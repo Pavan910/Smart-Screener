@@ -14,11 +14,21 @@ def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 skill_library = {
-    "python": ["python", "pandas", "numpy", "scikit-learn", "jupyter"],
-    "sql": ["sql", "postgres", "mysql", "database", "query"],
-    "dashboard": ["dashboard", "tableau", "power bi", "bi", "reporting"],
-    "business communication": ["business communication", "business stakeholder", "stakeholder management", "communication", "executive"],
-    "analytics": ["analytics", "data analysis", "kpi", "insights"],
+    "python": ["python", "pandas", "numpy", "scikit-learn", "jupyter", "flask", "django", "fastapi"],
+    "sql": ["sql", "postgres", "postgresql", "mysql", "database", "query", "oracle", "sqlite", "mongodb", "nosql"],
+    "dashboard": ["dashboard", "tableau", "power bi", "powerbi", "bi", "reporting", "looker", "metabase", "superset"],
+    "business communication": ["business communication", "business stakeholder", "stakeholder management", "communication", "executive", "presentation", "client facing"],
+    "analytics": ["analytics", "data analysis", "kpi", "insights", "metrics", "statistical analysis", "data-driven"],
+    "machine learning": ["machine learning", "ml", "deep learning", "neural network", "tensorflow", "pytorch", "keras", "nlp", "computer vision"],
+    "excel": ["excel", "spreadsheet", "pivot table", "vlookup", "macro", "vba"],
+    "data visualization": ["visualization", "charts", "graphs", "data viz", "matplotlib", "seaborn", "plotly", "d3"],
+    "cloud": ["aws", "azure", "gcp", "google cloud", "cloud computing", "s3", "ec2", "lambda"],
+    "etl": ["etl", "data pipeline", "data engineering", "airflow", "spark", "hadoop", "data warehouse"],
+    "leadership": ["leadership", "team lead", "manager", "managed", "mentored", "supervised", "coordinated"],
+    "agile": ["agile", "scrum", "sprint", "kanban", "jira", "product owner"],
+    "java": ["java", "spring", "spring boot", "hibernate", "maven"],
+    "javascript": ["javascript", "react", "angular", "vue", "node", "nodejs", "typescript"],
+    "project management": ["project management", "pmp", "program management", "roadmap", "milestone"],
 }
 
 sample_candidates = [
@@ -83,14 +93,21 @@ def analyze_resumes(job_text, candidates):
         covered = [s for s in skills if s in custom_skills]
         missing = [s for s in skills if s not in custom_skills]
         skill_score = round((len(covered) / max(len(skills), 1)) * 60)
-        exp_score = min(14, max((c.get("experience") or 4) - 2, 0) * 2)
+        exp = c.get("experience") or 0
+        exp_score = min(14, max(exp - 2, 0) * 2) if exp > 0 else 0
         keyword_score = min(16, sum(1 for word in re.findall(r"[a-z0-9]+", normalize_text(job_text)) if word and len(word) >= 3 and word in normalized_resume))
-        score = min(96, max(55, int(skill_score + exp_score + keyword_score)))
+        score = min(96, max(40, int(skill_score + exp_score + keyword_score)))
         ranking.append({
             "name": c.get("name", "Unknown"),
-            "title": c.get("title", "Resume"),
-            "experience": c.get("experience", 4),
-            "email": c.get("email", "unknown@example.com"),
+            "title": c.get("title") or c.get("currentRole") or "",
+            "experience": exp,
+            "email": c.get("email") or "",
+            "phone": c.get("phone") or "",
+            "location": c.get("location") or "",
+            "linkedin": c.get("linkedin") or "",
+            "currentRole": c.get("currentRole") or c.get("title") or "",
+            "currentCompany": c.get("currentCompany") or "",
+            "education": c.get("education") or "",
             "skills": list(set(c.get("skills", []) + custom_skills)),
             "coveredSkills": covered,
             "missingSkills": missing,
@@ -147,23 +164,42 @@ def catch_all(path):
         # Ranking request
         job_text = data.get("jobDescription") or sample_job_description()
         uploaded = data.get("resumes") or []
-        candidates = list(sample_candidates)
 
-        for i, item in enumerate(uploaded):
-            if isinstance(item, dict):
-                resume_text = item.get("resume") or item.get("text") or item.get("content") or ""
-                name = item.get("name") or f"Uploaded {i+1}"
-            else:
-                resume_text = str(item)
-                name = f"Uploaded {i+1}"
-            candidates.append({
-                "name": name,
-                "title": "Uploaded Resume",
-                "experience": 4,
-                "email": f"uploaded{i+1}@example.com",
-                "skills": [],
-                "resume": resume_text
-            })
+        # Only use uploaded resumes if provided, otherwise fall back to sample data
+        if uploaded:
+            candidates = []
+            for i, item in enumerate(uploaded):
+                if isinstance(item, dict):
+                    resume_text = item.get("resume") or item.get("text") or item.get("content") or ""
+                    name = item.get("name") or f"Candidate {i+1}"
+                    # Use metadata from frontend extraction
+                    candidates.append({
+                        "name": name,
+                        "title": item.get("currentRole") or item.get("title") or "",
+                        "experience": item.get("experience") or 0,
+                        "email": item.get("email") or "",
+                        "phone": item.get("phone") or "",
+                        "location": item.get("location") or "",
+                        "linkedin": item.get("linkedin") or "",
+                        "currentRole": item.get("currentRole") or "",
+                        "currentCompany": item.get("currentCompany") or "",
+                        "education": item.get("education") or "",
+                        "skills": item.get("skills") or [],
+                        "resume": resume_text
+                    })
+                else:
+                    resume_text = str(item)
+                    candidates.append({
+                        "name": f"Candidate {i+1}",
+                        "title": "",
+                        "experience": 0,
+                        "email": "",
+                        "skills": [],
+                        "resume": resume_text
+                    })
+        else:
+            # Only use sample data if no resumes uploaded (for demo/testing)
+            candidates = list(sample_candidates)
 
         ranking = analyze_resumes(job_text, candidates)
         response = jsonify({

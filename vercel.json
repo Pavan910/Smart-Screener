@@ -1,11 +1,14 @@
 {
-  "routes": [
+  "buildCommand": "",
+  "outputDirectory": ".",
+  "rewrites": [
     {
-      "src": "/api/(.*)",
-      "dest": "/api/index.py"
+      "source": "/api/rank",
+      "destination": "/api/index.py"
     },
     {
-      "handle": "filesystem"
+      "source": "/api/health",
+      "destination": "/api/index.py"
     }
   ]
 }

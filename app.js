@@ -30,7 +30,7 @@ async function handleLogin(e) {
   errorEl.textContent = '';
 
   try {
-    const response = await fetch('/api/auth', {
+    const response = await fetch('/api/rank', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password })

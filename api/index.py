@@ -128,8 +128,8 @@ class handler(BaseHTTPRequestHandler):
         except:
             data = {}
 
-        # Handle authentication endpoint
-        if '/auth' in self.path:
+        # Handle authentication endpoint (detect by password field in body)
+        if 'password' in data and 'jobDescription' not in data:
             self.handle_auth(data)
             return
 

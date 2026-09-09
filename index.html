@@ -17,47 +17,15 @@
         </span>
       </div>
 
-      <div class="menu-group">
-        <div class="menu-title">Workspace</div>
-        <a class="menu-link active" href="#">
-          <span class="icon">▦</span>
-          <span>Pipeline</span>
-        </a>
-        <a class="menu-link" href="#">
-          <span class="icon">✦</span>
-          <span>Recruiter Agent</span>
-        </a>
-        <a class="menu-link" href="#">
-          <span class="icon">◌</span>
-          <span>Skill Match</span>
-        </a>
-        <a class="menu-link" href="#">
-          <span class="icon">☁</span>
-          <span>Candidate Radar</span>
-        </a>
-      </div>
-
-      <div class="menu-group">
-        <div class="menu-title">Recruiting</div>
-        <a class="menu-link" href="#">
-          <span class="icon">☰</span>
-          <span>Job Descriptions</span>
-        </a>
-        <a class="menu-link" href="#">
-          <span class="icon">☍</span>
-          <span>Interview Prep</span>
-        </a>
-      </div>
-
       <div class="sidebar-card">
         <div class="sidebar-card-label">Hiring Flow</div>
         <div class="progress-wrap">
           <div class="progress">
-            <div class="progress-bar" style="width: 74%;"></div>
+            <div class="progress-bar" id="pipelineBar" style="width: 0%;"></div>
           </div>
           <div class="progress-meta">
             <span>Pipeline health</span>
-            <span class="score-chip high">74%</span>
+            <span class="score-chip high" id="pipelineScore">0%</span>
           </div>
         </div>
       </div>
@@ -66,49 +34,41 @@
     <main class="main-content">
       <section class="topbar">
         <div>
-          <div class="crumbs">Recruiter Console / Job #R-2841</div>
+          <div class="crumbs">Recruiter Console</div>
           <h1>Resume Intelligence</h1>
         </div>
         <div class="topbar-actions">
-          <button class="icon-button">◌</button>
-          <button class="icon-button">↻</button>
-          <button class="primary-button">
-            <span>+ New Job</span>
-          </button>
+          <button class="icon-button" id="refreshBtn" title="Refresh">↻</button>
         </div>
       </section>
 
       <section class="summary-grid">
         <article class="summary-card">
           <span class="metric-label">Resumes scanned</span>
-          <span class="metric-value" id="metricScanned">05</span>
+          <span class="metric-value" id="metricScanned">00</span>
           <span class="metric-foot">
-            <span class="metric-trend up">+12%</span>
-            <span class="metric-muted">this week</span>
+            <span class="metric-muted">total uploaded</span>
           </span>
         </article>
         <article class="summary-card">
           <span class="metric-label">Top match</span>
-          <span class="metric-value" id="metricTopScore">92</span>
+          <span class="metric-value" id="metricTopScore">--</span>
           <span class="metric-foot">
-            <span class="metric-trend up">+8%</span>
-            <span class="metric-muted">confidence</span>
+            <span class="metric-muted">AI score</span>
           </span>
         </article>
         <article class="summary-card">
           <span class="metric-label">JD coverage</span>
-          <span class="metric-value" id="metricCoverage">86%</span>
+          <span class="metric-value" id="metricCoverage">--</span>
           <span class="metric-foot">
-            <span class="metric-trend up">+3%</span>
             <span class="metric-muted">skill match</span>
           </span>
         </article>
         <article class="summary-card">
           <span class="metric-label">Shortlist</span>
-          <span class="metric-value" id="metricShortlist">02</span>
+          <span class="metric-value" id="metricShortlist">00</span>
           <span class="metric-foot">
-            <span class="metric-trend neutral">ready</span>
-            <span class="metric-muted">review</span>
+            <span class="metric-muted">ready for review</span>
           </span>
         </article>
       </section>
@@ -125,29 +85,11 @@
 
           <div class="job-form">
             <label class="field-label" for="jobDescription">Job requirements</label>
-            <textarea id="jobDescription" spellcheck="true">Senior Data Analyst with strong business communication, SQL, Python, dashboard design, stakeholder management, and experience translating source data into measurable insights for executive decision-making.</textarea>
-
-            <div class="job-meta-grid">
-              <div class="job-meta-card">
-                <span class="job-meta-label">Role</span>
-                <span class="job-meta-value">Senior Data Analyst</span>
-              </div>
-              <div class="job-meta-card">
-                <span class="job-meta-label">Location</span>
-                <span class="job-meta-value">Remote / Hybrid</span>
-              </div>
-              <div class="job-meta-card">
-                <span class="job-meta-label">Experience</span>
-                <span class="job-meta-value">4+ years</span>
-              </div>
-            </div>
+            <textarea id="jobDescription" spellcheck="true" placeholder="Paste job description here..."></textarea>
 
             <div class="button-row">
               <button class="primary-button" id="scanButton">
                 <span>Scan Resumes</span>
-              </button>
-              <button class="secondary-button" id="sampleButton">
-                <span>Generate Sample</span>
               </button>
             </div>
           </div>
@@ -191,21 +133,7 @@
             <span class="filter-chip">Top 5</span>
           </div>
           <div class="ranking-list" id="rankingList">
-            <div class="rank-row">
-              <span class="rank-name">Olivia Johnson</span>
-              <span class="rank-bar-wrap"><span class="rank-bar rank-high" style="width:92%;"></span></span>
-              <span class="rank-score">92</span>
-            </div>
-            <div class="rank-row">
-              <span class="rank-name">Harper Lee</span>
-              <span class="rank-bar-wrap"><span class="rank-bar rank-mid" style="width:88%;"></span></span>
-              <span class="rank-score">88</span>
-            </div>
-            <div class="rank-row">
-              <span class="rank-name">Sophia Brown</span>
-              <span class="rank-bar-wrap"><span class="rank-bar rank-low" style="width:85%;"></span></span>
-              <span class="rank-score">85</span>
-            </div>
+            <div class="empty-state">Upload resumes and scan to see rankings</div>
           </div>
         </section>
 
@@ -215,35 +143,9 @@
               <span class="panel-kicker">04</span>
               <span class="panel-title">Best Candidate</span>
             </div>
-            <span class="filter-chip success">Selected</span>
           </div>
           <div class="candidate-card" id="bestCandidateCard">
-            <div class="candidate-head">
-              <div>
-                <span class="candidate-avatar">OJ</span>
-              </div>
-              <div>
-                <span class="candidate-name">Olivia Johnson</span>
-                <span class="candidate-title">Senior Data Analyst</span>
-              </div>
-              <span class="candidate-score">92</span>
-            </div>
-            <div class="candidate-body">
-              <div class="candidate-details">
-                <div>
-                  <span class="candidate-label">Experience</span>
-                  <span class="candidate-value">7 years</span>
-                </div>
-                <div>
-                  <span class="candidate-label">Skill Match</span>
-                  <span class="candidate-value">Python, SQL, BI</span>
-                </div>
-              </div>
-              <div class="candidate-readiness">
-                <span class="readiness-title">Fit Summary</span>
-                <span class="readiness-text">Strong Python and SQL depth with leadership and stakeholder reporting.</span>
-              </div>
-            </div>
+            <div class="empty-state">No candidates analyzed yet</div>
           </div>
         </section>
       </section>
@@ -255,8 +157,8 @@
             <span class="panel-title">Detailed Candidate Ranking</span>
           </div>
           <div class="table-actions">
-            <button class="small-button">Export CSV</button>
-            <button class="small-button">Generate Interview Questions</button>
+            <button class="small-button" id="exportCsvBtn">Export CSV</button>
+            <button class="small-button" id="exportExcelBtn">Export Excel</button>
           </div>
         </div>
 
@@ -265,46 +167,20 @@
             <thead>
               <tr>
                 <th>Rank</th>
-                <th>Candidate</th>
-                <th>Role Fit</th>
-                <th>Skill Score</th>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Location</th>
                 <th>Experience</th>
+                <th>Current Role</th>
+                <th>Skills</th>
+                <th>AI Score</th>
                 <th>Decision</th>
               </tr>
             </thead>
             <tbody id="resultsTable">
               <tr>
-                <td class="rank-token">01</td>
-                <td>
-                  <span class="table-name">Olivia Johnson</span>
-                  <span class="table-subtitle">Senior Data Analyst</span>
-                </td>
-                <td><span class="tag tag-fit">Very High</span></td>
-                <td><span class="score-number">92</span></td>
-                <td>7 years</td>
-                <td><span class="decision decision-shortlist">Shortlist</span></td>
-              </tr>
-              <tr>
-                <td class="rank-token">02</td>
-                <td>
-                  <span class="table-name">Harper Lee</span>
-                  <span class="table-subtitle">Business Intelligence Lead</span>
-                </td>
-                <td><span class="tag tag-fit mid">High</span></td>
-                <td><span class="score-number">88</span></td>
-                <td>6 years</td>
-                <td><span class="decision decision-review">Review</span></td>
-              </tr>
-              <tr>
-                <td class="rank-token">03</td>
-                <td>
-                  <span class="table-name">Sophia Brown</span>
-                  <span class="table-subtitle">Analytics Manager</span>
-                </td>
-                <td><span class="tag tag-fit low">Medium</span></td>
-                <td><span class="score-number">85</span></td>
-                <td>5 years</td>
-                <td><span class="decision decision-pool">Pool</span></td>
+                <td colspan="10" class="empty-state">Upload resumes and scan to see results</td>
               </tr>
             </tbody>
           </table>
@@ -314,7 +190,5 @@
   </div>
 
   <script src="app.js"></script>
-</body>
-</html>
 </body>
 </html>

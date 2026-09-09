@@ -1,3 +1,72 @@
+// =====================
+// PASSWORD PROTECTION
+// =====================
+// Change this password hash to set your password
+// To generate a new hash, run in console: btoa('yourpassword')
+const PASSWORD_HASH = 'c21hcnRzY3JlZW5lcjEyMw=='; // Default: smartscreener123
+
+function checkAuth() {
+  const auth = sessionStorage.getItem('ss_auth');
+  return auth === 'authenticated';
+}
+
+function showApp() {
+  document.getElementById('loginOverlay').style.display = 'none';
+  document.getElementById('appShell').style.display = 'flex';
+}
+
+function showLogin() {
+  document.getElementById('loginOverlay').style.display = 'flex';
+  document.getElementById('appShell').style.display = 'none';
+}
+
+function handleLogin(e) {
+  e.preventDefault();
+  const password = document.getElementById('passwordInput').value;
+  const errorEl = document.getElementById('loginError');
+
+  // Check password (base64 encoded for basic obfuscation)
+  if (btoa(password) === PASSWORD_HASH) {
+    sessionStorage.setItem('ss_auth', 'authenticated');
+    errorEl.textContent = '';
+    showApp();
+  } else {
+    errorEl.textContent = 'Incorrect password. Please try again.';
+    document.getElementById('passwordInput').value = '';
+  }
+}
+
+function handleLogout() {
+  sessionStorage.removeItem('ss_auth');
+  currentRankingData = [];
+  showLogin();
+}
+
+// Initialize auth check
+document.addEventListener('DOMContentLoaded', () => {
+  const loginForm = document.getElementById('loginForm');
+  const logoutBtn = document.getElementById('logoutBtn');
+
+  if (loginForm) {
+    loginForm.addEventListener('submit', handleLogin);
+  }
+
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', handleLogout);
+  }
+
+  // Check if already authenticated
+  if (checkAuth()) {
+    showApp();
+  } else {
+    showLogin();
+  }
+});
+
+// =====================
+// MAIN APP CODE
+// =====================
+
 const sampleJobDescription = `Senior Data Analyst with strong business communication, SQL, Python, dashboard design, stakeholder management, and experience translating source data into measurable insights for executive decision-making.`;
 
 // Store current ranking data for export

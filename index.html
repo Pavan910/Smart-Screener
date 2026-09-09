@@ -3,17 +3,33 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>RecruitIQ Agent</title>
+  <title>Smart Screener</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="app-shell">
+  <!-- Login Overlay -->
+  <div class="login-overlay" id="loginOverlay">
+    <div class="login-box">
+      <div class="login-brand">
+        <span class="login-icon">S</span>
+        <span class="login-title">Smart Screener</span>
+      </div>
+      <p class="login-subtitle">Enter password to access</p>
+      <form id="loginForm">
+        <input type="password" id="passwordInput" placeholder="Enter password" autocomplete="current-password" required />
+        <button type="submit" class="login-button">Login</button>
+        <p class="login-error" id="loginError"></p>
+      </form>
+    </div>
+  </div>
+
+  <div class="app-shell" id="appShell" style="display: none;">
     <aside class="sidebar">
       <div class="brand">
-        <span class="brand-icon">R</span>
+        <span class="brand-icon">S</span>
         <span class="brand-copy">
-          <span class="brand-label">RecruitIQ</span>
-          <span class="brand-subtitle">Talent Intelligence</span>
+          <span class="brand-label">Smart Screener</span>
+          <span class="brand-subtitle">Resume Intelligence</span>
         </span>
       </div>
 
@@ -29,12 +45,14 @@
           </div>
         </div>
       </div>
+
+      <button class="logout-button" id="logoutBtn">Logout</button>
     </aside>
 
     <main class="main-content">
       <section class="topbar">
         <div>
-          <div class="crumbs">Recruiter Console</div>
+          <div class="crumbs">Smart Screener</div>
           <h1>Resume Intelligence</h1>
         </div>
         <div class="topbar-actions">

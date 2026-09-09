@@ -12,7 +12,7 @@
     },
     {
       "source": "/api/auth",
-      "destination": "/api/auth.py"
+      "destination": "/api/index.py"
     }
   ]
 }

@@ -1,6 +1,15 @@
 from http.server import BaseHTTPRequestHandler
 import json
 import re
+import os
+import hashlib
+
+# Authentication - Password stored in Vercel environment variable
+def get_password():
+    return os.environ.get('APP_PASSWORD', '')
+
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
 
 skill_library = {
     "python": ["python", "pandas", "numpy", "scikit-learn", "jupyter"],
@@ -119,6 +128,11 @@ class handler(BaseHTTPRequestHandler):
         except:
             data = {}
 
+        # Handle authentication endpoint
+        if '/auth' in self.path:
+            self.handle_auth(data)
+            return
+
         job_text = data.get("jobDescription") or sample_job_description()
         uploaded = data.get("resumes") or []
 
@@ -151,6 +165,36 @@ class handler(BaseHTTPRequestHandler):
         })
 
         self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(response.encode())
+
+    def handle_auth(self, data):
+        submitted_password = data.get("password", "")
+        correct_password = get_password()
+
+        # Check if password is configured
+        if not correct_password:
+            response = json.dumps({
+                "success": False,
+                "error": "Password not configured. Set APP_PASSWORD in Vercel."
+            })
+            self.send_response(500)
+        elif submitted_password == correct_password:
+            token = hash_password(correct_password + "smart-screener-session")
+            response = json.dumps({
+                "success": True,
+                "token": token
+            })
+            self.send_response(200)
+        else:
+            response = json.dumps({
+                "success": False,
+                "error": "Invalid password"
+            })
+            self.send_response(401)
+
         self.send_header('Content-Type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()

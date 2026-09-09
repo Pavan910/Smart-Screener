@@ -1,13 +1,12 @@
 // =====================
-// PASSWORD PROTECTION
+// PASSWORD PROTECTION (Server-side)
 // =====================
-// Change this password hash to set your password
-// To generate a new hash, run in console: btoa('yourpassword')
-const PASSWORD_HASH = 'c21hcnRzY3JlZW5lcjEyMw=='; // Default: smartscreener123
+// Password is validated on the server using environment variable
+// Set APP_PASSWORD in Vercel Dashboard > Settings > Environment Variables
 
 function checkAuth() {
-  const auth = sessionStorage.getItem('ss_auth');
-  return auth === 'authenticated';
+  const token = sessionStorage.getItem('ss_auth_token');
+  return token && token.length > 0;
 }
 
 function showApp() {
@@ -20,24 +19,43 @@ function showLogin() {
   document.getElementById('appShell').style.display = 'none';
 }
 
-function handleLogin(e) {
+async function handleLogin(e) {
   e.preventDefault();
   const password = document.getElementById('passwordInput').value;
   const errorEl = document.getElementById('loginError');
+  const loginBtn = document.querySelector('.login-button');
 
-  // Check password (base64 encoded for basic obfuscation)
-  if (btoa(password) === PASSWORD_HASH) {
-    sessionStorage.setItem('ss_auth', 'authenticated');
-    errorEl.textContent = '';
-    showApp();
-  } else {
-    errorEl.textContent = 'Incorrect password. Please try again.';
-    document.getElementById('passwordInput').value = '';
+  loginBtn.disabled = true;
+  loginBtn.textContent = 'Verifying...';
+  errorEl.textContent = '';
+
+  try {
+    const response = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    });
+
+    const result = await response.json();
+
+    if (result.success && result.token) {
+      sessionStorage.setItem('ss_auth_token', result.token);
+      showApp();
+    } else {
+      errorEl.textContent = 'Incorrect password. Please try again.';
+      document.getElementById('passwordInput').value = '';
+    }
+  } catch (error) {
+    console.error('Auth error:', error);
+    errorEl.textContent = 'Connection error. Please try again.';
+  } finally {
+    loginBtn.disabled = false;
+    loginBtn.textContent = 'Login';
   }
 }
 
 function handleLogout() {
-  sessionStorage.removeItem('ss_auth');
+  sessionStorage.removeItem('ss_auth_token');
   currentRankingData = [];
   showLogin();
 }

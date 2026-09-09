@@ -1,8 +1,10 @@
-from http.server import BaseHTTPRequestHandler
+from flask import Flask, request, jsonify
 import json
 import re
 import os
 import hashlib
+
+app = Flask(__name__)
 
 # Authentication - Password stored in Vercel environment variable
 def get_password():
@@ -105,104 +107,83 @@ def analyze_resumes(job_text, candidates):
     ranking.sort(key=lambda x: x["score"], reverse=True)
     return ranking
 
+@app.route('/api/rank', methods=['GET', 'POST', 'OPTIONS'])
+@app.route('/api/health', methods=['GET', 'OPTIONS'])
+@app.route('/api/auth', methods=['POST', 'OPTIONS'])
+def api_handler():
+    # Handle CORS preflight
+    if request.method == 'OPTIONS':
+        response = jsonify({})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return response
 
-class handler(BaseHTTPRequestHandler):
-    def do_GET(self):
+    # Handle GET request
+    if request.method == 'GET':
         job_text = sample_job_description()
         ranking = analyze_resumes(job_text, sample_candidates)
+        response = jsonify({"ranking": ranking, "candidateCount": len(ranking)})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return response
 
-        response = json.dumps({"ranking": ranking, "candidateCount": len(ranking)})
-
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
-        self.wfile.write(response.encode())
-
-    def do_POST(self):
-        content_length = int(self.headers.get('Content-Length', 0))
-        body = self.rfile.read(content_length)
-
+    # Handle POST request
+    if request.method == 'POST':
         try:
-            data = json.loads(body) if body else {}
+            data = request.get_json() or {}
         except:
             data = {}
 
-        # Handle authentication endpoint (detect by password field in body)
+        # Check if this is an auth request
         if 'password' in data and 'jobDescription' not in data:
-            self.handle_auth(data)
-            return
+            submitted_password = data.get("password", "")
+            correct_password = get_password()
 
-        job_text = data.get("jobDescription") or sample_job_description()
-        uploaded = data.get("resumes") or []
-
-        candidates = list(sample_candidates)
-
-        for i, item in enumerate(uploaded):
-            if isinstance(item, dict):
-                resume_text = item.get("resume") or item.get("text") or item.get("content") or ""
-                name = item.get("name") or f"Uploaded {i+1}"
+            if not correct_password:
+                response = jsonify({"success": False, "error": "Password not configured. Set APP_PASSWORD in Vercel."})
+                response.status_code = 500
+            elif submitted_password == correct_password:
+                token = hash_password(correct_password + "smart-screener-session")
+                response = jsonify({"success": True, "token": token})
             else:
-                resume_text = str(item)
-                name = f"Uploaded {i+1}"
-
-            candidates.append({
-                "name": name,
-                "title": "Uploaded Resume",
-                "experience": 4,
-                "email": f"uploaded{i+1}@example.com",
-                "skills": [],
-                "resume": resume_text
-            })
-
-        ranking = analyze_resumes(job_text, candidates)
-
-        response = json.dumps({
-            "ranking": ranking,
-            "jobDescription": job_text,
-            "candidateCount": len(ranking),
-            "bestCandidate": ranking[0] if ranking else None
-        })
-
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
-        self.wfile.write(response.encode())
-
-    def handle_auth(self, data):
-        submitted_password = data.get("password", "")
-        correct_password = get_password()
-
-        # Check if password is configured
-        if not correct_password:
-            response = json.dumps({
-                "success": False,
-                "error": "Password not configured. Set APP_PASSWORD in Vercel."
-            })
-            self.send_response(500)
-        elif submitted_password == correct_password:
-            token = hash_password(correct_password + "smart-screener-session")
-            response = json.dumps({
-                "success": True,
-                "token": token
-            })
-            self.send_response(200)
+                response = jsonify({"success": False, "error": "Invalid password"})
+                response.status_code = 401
         else:
-            response = json.dumps({
-                "success": False,
-                "error": "Invalid password"
+            # Handle ranking request
+            job_text = data.get("jobDescription") or sample_job_description()
+            uploaded = data.get("resumes") or []
+
+            candidates = list(sample_candidates)
+
+            for i, item in enumerate(uploaded):
+                if isinstance(item, dict):
+                    resume_text = item.get("resume") or item.get("text") or item.get("content") or ""
+                    name = item.get("name") or f"Uploaded {i+1}"
+                else:
+                    resume_text = str(item)
+                    name = f"Uploaded {i+1}"
+
+                candidates.append({
+                    "name": name,
+                    "title": "Uploaded Resume",
+                    "experience": 4,
+                    "email": f"uploaded{i+1}@example.com",
+                    "skills": [],
+                    "resume": resume_text
+                })
+
+            ranking = analyze_resumes(job_text, candidates)
+
+            response = jsonify({
+                "ranking": ranking,
+                "jobDescription": job_text,
+                "candidateCount": len(ranking),
+                "bestCandidate": ranking[0] if ranking else None
             })
-            self.send_response(401)
 
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
-        self.wfile.write(response.encode())
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return response
 
-    def do_OPTIONS(self):
-        self.send_response(200)
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
-        self.end_headers()
+# For Vercel
+if __name__ == '__main__':
+    app.run()

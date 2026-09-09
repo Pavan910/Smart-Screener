@@ -1,1 +1,1 @@
-# No external dependencies needed for basic API
+flask==3.0.0

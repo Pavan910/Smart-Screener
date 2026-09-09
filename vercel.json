@@ -3,15 +3,7 @@
   "outputDirectory": ".",
   "rewrites": [
     {
-      "source": "/api/rank",
-      "destination": "/api/index.py"
-    },
-    {
-      "source": "/api/health",
-      "destination": "/api/index.py"
-    },
-    {
-      "source": "/api/auth",
+      "source": "/api/(.*)",
       "destination": "/api/index.py"
     }
   ]

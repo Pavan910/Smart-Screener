@@ -13,9 +13,12 @@ DATA_DIR = Path("/tmp/data") if os.environ.get("VERCEL") else Path("data")
 UPLOAD_DIR = DATA_DIR / "uploads"
 RESUME_DIR = DATA_DIR / "resumes"
 
-DATA_DIR.mkdir(exist_ok=True)
-UPLOAD_DIR.mkdir(exist_ok=True)
-RESUME_DIR.mkdir(exist_ok=True)
+try:
+    DATA_DIR.mkdir(exist_ok=True)
+    UPLOAD_DIR.mkdir(exist_ok=True)
+    RESUME_DIR.mkdir(exist_ok=True)
+except Exception:
+    pass
 
 # Initialize Groq client
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")

@@ -3,14 +3,13 @@ import json
 import os
 import hashlib
 
-# Password is stored in Vercel environment variable
+# Password is stored ONLY in Vercel environment variable
 # Set it in Vercel Dashboard: Settings > Environment Variables
 # Variable name: APP_PASSWORD
-# Default password for local testing only (override in Vercel)
-DEFAULT_PASSWORD = "Omrao@12345"
+# If not set, authentication will fail
 
 def get_password():
-    return os.environ.get('APP_PASSWORD', DEFAULT_PASSWORD)
+    return os.environ.get('APP_PASSWORD', '')
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
@@ -27,6 +26,19 @@ class handler(BaseHTTPRequestHandler):
 
         submitted_password = data.get("password", "")
         correct_password = get_password()
+
+        # Check if password is configured
+        if not correct_password:
+            response = json.dumps({
+                "success": False,
+                "error": "Password not configured. Set APP_PASSWORD in Vercel."
+            })
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(response.encode())
+            return
 
         if submitted_password == correct_password:
             # Generate a simple session token

@@ -90,6 +90,9 @@ const sampleJobDescription = `Senior Data Analyst with strong business communica
 // Store current ranking data for export
 let currentRankingData = [];
 
+// Maximum number of resumes per upload
+const MAX_UPLOAD_LIMIT = 20;
+
 // =====================
 // INDEXEDDB STORAGE
 // =====================
@@ -399,12 +402,22 @@ function updateDashboardMetrics(ranking) {
   document.getElementById('pipelineScore').textContent = avgScore + '%';
 }
 
-function refreshFileList(files) {
+function refreshFileList(files, showLimitWarning = false) {
   fileList.innerHTML = '';
 
   if (files.length === 0) {
     fileList.innerHTML = '<div class="empty-files">No resumes selected</div>';
     uploadStatus.textContent = '0 files';
+    return;
+  }
+
+  // Check upload limit
+  if (files.length > MAX_UPLOAD_LIMIT) {
+    if (showLimitWarning) {
+      alert(`Upload limit exceeded. Maximum ${MAX_UPLOAD_LIMIT} resumes allowed per upload. You selected ${files.length} files.`);
+    }
+    fileList.innerHTML = `<div class="empty-files" style="color: #dc3545;">Too many files selected (${files.length}). Maximum ${MAX_UPLOAD_LIMIT} allowed.</div>`;
+    uploadStatus.textContent = `${files.length} files (limit: ${MAX_UPLOAD_LIMIT})`;
     return;
   }
 
@@ -433,6 +446,11 @@ async function runAnalysis() {
 
   if (uploadFiles.length === 0) {
     alert('Please upload at least one resume.');
+    return;
+  }
+
+  if (uploadFiles.length > MAX_UPLOAD_LIMIT) {
+    alert(`Too many resumes selected. Maximum ${MAX_UPLOAD_LIMIT} allowed per upload.`);
     return;
   }
 
@@ -610,7 +628,7 @@ clearFiles.addEventListener('click', () => {
 });
 
 resumeFiles.addEventListener('change', event => {
-  refreshFileList(Array.from(event.target.files));
+  refreshFileList(Array.from(event.target.files), true);
 });
 
 exportCsvBtn.addEventListener('click', exportToCSV);
@@ -638,7 +656,7 @@ dropZone.addEventListener('drop', event => {
   event.preventDefault();
   dropZone.style.borderColor = '#dae7e8';
   resumeFiles.files = event.dataTransfer.files;
-  refreshFileList(Array.from(event.dataTransfer.files));
+  refreshFileList(Array.from(event.dataTransfer.files), true);
 });
 
 // =====================
@@ -766,6 +784,11 @@ async function saveUploadedResumes() {
 
   if (uploadFiles.length === 0) {
     alert('Please upload resumes first.');
+    return;
+  }
+
+  if (uploadFiles.length > MAX_UPLOAD_LIMIT) {
+    alert(`Too many resumes selected. Maximum ${MAX_UPLOAD_LIMIT} allowed per upload.`);
     return;
   }
 

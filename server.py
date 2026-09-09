@@ -1,20 +1,15 @@
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from flask import Flask, request, jsonify, send_from_directory
 from pathlib import Path
 import json
-import mimetypes
 import os
-import tempfile
-import uuid
-from pypdf import PdfReader
-from docx import Document
 import re
 from dotenv import load_dotenv
-from groq import Groq
 
 load_dotenv()
 
-DATA_DIR = Path("data")
+app = Flask(__name__, static_folder=".")
+
+DATA_DIR = Path("/tmp/data") if os.environ.get("VERCEL") else Path("data")
 UPLOAD_DIR = DATA_DIR / "uploads"
 RESUME_DIR = DATA_DIR / "resumes"
 
@@ -24,14 +19,12 @@ RESUME_DIR.mkdir(exist_ok=True)
 
 # Initialize Groq client
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
-
-STATIC_FILES = {
-    "/": "index.html",
-    "/index.html": "index.html",
-    "/app.js": "app.js",
-    "/styles.css": "styles.css",
-}
+groq_client = None
+try:
+    from groq import Groq
+    groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+except ImportError:
+    pass
 
 skill_library = {
     "python": ["python", "pandas", "numpy", "scikit-learn", "jupyter"],
@@ -76,156 +69,6 @@ sample_candidates = [
     }
 ]
 
-class ResumeHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        parsed = urlparse(self.path)
-        if parsed.path == "/api/health":
-            self.send_json({"status": "ok", "candidates": len(sample_candidates)})
-            return
-
-        if parsed.path == "/api/rank":
-            job_text = "Senior Data Analyst with strong business communication, SQL, Python, dashboard design, stakeholder management, and experience translating source data into measurable insights for executive decision-making."
-            ranking = analyze_resumes(job_text, sample_candidates)
-            self.send_json({"ranking": ranking})
-            return
-
-        if parsed.path in STATIC_FILES:
-            file_path = Path(STATIC_FILES[parsed.path])
-            self.serve_static(file_path)
-            return
-
-        if parsed.path == "/favicon.ico":
-            self.serve_static(Path("favicon.ico"))
-            return
-
-        self.send_error(404, "Not found")
-
-    def do_POST(self):
-        parsed = urlparse(self.path)
-        if parsed.path == "/api/rank":
-            content_type = self.headers.get("Content-Type", "")
-            length = int(self.headers.get("Content-Length", "0"))
-            body = self.rfile.read(length)
-
-            try:
-                if "application/json" in content_type:
-                    data = json.loads(body.decode("utf-8"))
-                else:
-                    data = parse_qs(body.decode("utf-8"))
-            except Exception:
-                data = {}
-
-            job_text = data.get("jobDescription") or data.get("job_text") or sample_job_description()
-            uploaded_text = data.get("resumes") or []
-            files = []
-
-            # allow frontend to send a list of filename/text resume strings
-            if isinstance(uploaded_text, list):
-                files = uploaded_text
-            elif isinstance(uploaded_text, str):
-                files = [uploaded_text]
-
-            candidates = []
-            for candidate in sample_candidates:
-                candidates.append(candidate)
-
-            # If uploaded resumes are provided as text fragments, build transparent text candidates.
-            for index, item in enumerate(files):
-                if isinstance(item, dict):
-                    resume_text = item.get("resume") or item.get("text") or item.get("content") or ""
-                    name = item.get("name") or f"Uploaded Candidate {index+1}"
-                else:
-                    resume_text = str(item)
-                    name = f"Uploaded Candidate {index+1}"
-
-                candidates.append({
-                    "name": name,
-                    "title": "Uploaded Resume",
-                    "experience": 4,
-                    "email": f"uploaded{index+1}@example.com",
-                    "skills": [],
-                    "resume": resume_text
-                })
-
-            ranking = analyze_resumes(job_text, candidates)
-            self.send_json({
-                "ranking": ranking,
-                "jobDescription": job_text,
-                "candidateCount": len(ranking),
-                "bestCandidate": ranking[0] if ranking else None
-            })
-            return
-
-        if parsed.path == "/api/upload":
-            try:
-                self.handle_resume_upload()
-            except Exception as exc:
-                self.send_json({"error": str(exc)}, 400)
-            return
-
-        self.send_error(404, "Not found")
-
-    def handle_resume_upload(self):
-        # parse multipart upload
-        boundary = self.headers.get("Content-Type", "").split("boundary=")[-1]
-        content_length = int(self.headers.get("Content-Length", "0"))
-        raw = self.rfile.read(content_length)
-
-        # Very small browser-friendly multipart parser for text and docs
-        parts = raw.decode("utf-8", errors="ignore").split("--" + boundary)
-        candidates = []
-        for part in parts:
-            if "Content-Disposition" not in part or "filename" not in part:
-                continue
-            name_match = re.search(r'name="(.*?)"', part)
-            file_match = re.search(r'filename="(.*?)"', part)
-            if not file_match:
-                continue
-
-            filename = file_match.group(1)
-            content = part.split("\r\n\r\n", 1)[1].split("\r\n", 1)[0]
-            filepath = UPLOAD_DIR / filename
-            filepath.write_text(content, encoding="utf-8")
-
-            candidates.append({
-                "name": Path(filename).stem,
-                "title": "Uploaded Resume",
-                "experience": 4,
-                "email": "uploaded@example.com",
-                "skills": [],
-                "resume": content
-            })
-
-        job_description = sample_job_description()
-        ranking = analyze_resumes(job_description, sample_candidates + candidates)
-        self.send_json({"ranking": ranking, "candidateCount": len(ranking)})
-
-    def serve_static(self, file_path):
-        path = Path(file_path)
-        full_path = Path.cwd() / path
-        if not full_path.exists():
-            self.send_error(404, "Static file not found")
-            return
-
-        content = full_path.read_bytes()
-        guess = mimetypes.guess_type(str(full_path))
-        self.send_response(200)
-        self.send_header("Content-Type", guess[0] or "application/octet-stream")
-        self.send_header("Content-Length", str(len(content)))
-        self.end_headers()
-        self.wfile.write(content)
-
-    def send_json(self, payload, status=200):
-        data = json.dumps(payload).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
-
-    def log_message(self, format, *args):
-        return
-
 
 def sample_job_description():
     return "Senior Data Analyst with strong business communication, SQL, Python, dashboard design, stakeholder management, and experience translating source data into measurable insights for executive decision-making."
@@ -242,27 +85,6 @@ def extract_skills(job_text):
         if any(s in normalized for s in synonyms):
             found.append(key)
     return found
-
-
-def extract_resume_text(file_path):
-    path = Path(file_path)
-    suffix = path.suffix.lower()
-    try:
-        if suffix == ".pdf":
-            reader = PdfReader(str(path))
-            pages = [page.extract_text() or "" for page in reader.pages]
-            text = "\n".join(pages)
-            return text
-        if suffix == ".docx":
-            doc = Document(str(path))
-            return "\n".join(p[0].text if hasattr(p[0], 'text') else "" for p in [paragraph for paragraph in doc.paragraphs])
-        if suffix in [".txt", ".md"]:
-            return path.read_text(encoding="utf-8", errors="ignore")
-        if suffix == ".html":
-            return re.sub(r"<[^>]+>", " ", path.read_text(encoding="utf-8", errors="ignore"))
-    except Exception:
-        return path.read_text(encoding="utf-8", errors="ignore")
-    return ""
 
 
 def analyze_with_llm(job_text, candidate):
@@ -305,7 +127,6 @@ Respond in JSON format:
 
         result_text = response.choices[0].message.content.strip()
 
-        # Extract JSON from response (handle markdown code blocks)
         if "```json" in result_text:
             result_text = result_text.split("```json")[1].split("```")[0].strip()
         elif "```" in result_text:
@@ -327,19 +148,16 @@ def analyze_resumes(job_text, candidates):
         normalized_resume = normalize_text(resume_text)
         custom_skills = []
 
-        # Try LLM analysis first
         llm_result = None
         if groq_client:
             llm_result = analyze_with_llm(job_text, c)
 
         if llm_result and "score" in llm_result:
-            # Use LLM analysis
             covered = llm_result.get("covered_skills", [])
             missing = llm_result.get("missing_skills", [])
             score = int(llm_result.get("score", 70))
             fit_summary = llm_result.get("fit_summary", "")
 
-            # Extract skills from resume for display
             for skill_key, synonyms in skill_library.items():
                 if any(s in normalized_resume for s in synonyms):
                     custom_skills.append(skill_key)
@@ -358,7 +176,6 @@ def analyze_resumes(job_text, candidates):
                 "analyzedBy": "LLM"
             })
         else:
-            # Fallback to keyword-based analysis
             for skill_key, synonyms in skill_library.items():
                 if any(s in normalized_resume for s in synonyms):
                     custom_skills.append(skill_key)
@@ -388,11 +205,104 @@ def analyze_resumes(job_text, candidates):
     return ranking
 
 
-def main():
-    server = ThreadingHTTPServer(("0.0.0.0", 8000), ResumeHandler)
-    print("Resume Agent server running on http://127.0.0.1:8000")
-    server.serve_forever()
+@app.route("/")
+def index():
+    return send_from_directory(".", "index.html")
+
+
+@app.route("/index.html")
+def index_html():
+    return send_from_directory(".", "index.html")
+
+
+@app.route("/app.js")
+def app_js():
+    return send_from_directory(".", "app.js")
+
+
+@app.route("/styles.css")
+def styles_css():
+    return send_from_directory(".", "styles.css")
+
+
+@app.route("/favicon.ico")
+def favicon():
+    return send_from_directory(".", "favicon.ico")
+
+
+@app.route("/api/health")
+def health():
+    return jsonify({"status": "ok", "candidates": len(sample_candidates)})
+
+
+@app.route("/api/rank", methods=["GET", "POST"])
+def rank():
+    if request.method == "GET":
+        job_text = sample_job_description()
+        ranking = analyze_resumes(job_text, sample_candidates)
+        return jsonify({"ranking": ranking})
+
+    data = request.get_json() or {}
+    job_text = data.get("jobDescription") or data.get("job_text") or sample_job_description()
+    uploaded_text = data.get("resumes") or []
+
+    files = []
+    if isinstance(uploaded_text, list):
+        files = uploaded_text
+    elif isinstance(uploaded_text, str):
+        files = [uploaded_text]
+
+    candidates = list(sample_candidates)
+
+    for index, item in enumerate(files):
+        if isinstance(item, dict):
+            resume_text = item.get("resume") or item.get("text") or item.get("content") or ""
+            name = item.get("name") or f"Uploaded Candidate {index+1}"
+        else:
+            resume_text = str(item)
+            name = f"Uploaded Candidate {index+1}"
+
+        candidates.append({
+            "name": name,
+            "title": "Uploaded Resume",
+            "experience": 4,
+            "email": f"uploaded{index+1}@example.com",
+            "skills": [],
+            "resume": resume_text
+        })
+
+    ranking = analyze_resumes(job_text, candidates)
+    return jsonify({
+        "ranking": ranking,
+        "jobDescription": job_text,
+        "candidateCount": len(ranking),
+        "bestCandidate": ranking[0] if ranking else None
+    })
+
+
+@app.route("/api/upload", methods=["POST"])
+def upload():
+    try:
+        candidates = []
+        if request.files:
+            for key in request.files:
+                file = request.files[key]
+                content = file.read().decode("utf-8", errors="ignore")
+                candidates.append({
+                    "name": Path(file.filename).stem if file.filename else "Uploaded",
+                    "title": "Uploaded Resume",
+                    "experience": 4,
+                    "email": "uploaded@example.com",
+                    "skills": [],
+                    "resume": content
+                })
+
+        job_description = sample_job_description()
+        ranking = analyze_resumes(job_description, sample_candidates + candidates)
+        return jsonify({"ranking": ranking, "candidateCount": len(ranking)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 
 if __name__ == "__main__":
-    main()
+    app.run(host="0.0.0.0", port=8000, debug=True)

@@ -42,7 +42,7 @@ async function handleLogin(e) {
       sessionStorage.setItem('ss_auth_token', result.token);
       showApp();
     } else {
-      errorEl.textContent = 'Incorrect password. Please try again.';
+      errorEl.textContent = result.error || 'Incorrect password. Please try again.';
       document.getElementById('passwordInput').value = '';
     }
   } catch (error) {

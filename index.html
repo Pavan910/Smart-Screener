@@ -23,6 +23,19 @@
     </div>
   </div>
 
+  <!-- Resume Viewer Modal -->
+  <div class="modal-overlay" id="resumeModal" style="display: none;">
+    <div class="modal-box">
+      <div class="modal-header">
+        <span class="modal-title" id="modalTitle">Resume</span>
+        <button class="modal-close" id="closeModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <pre id="resumeContent"></pre>
+      </div>
+    </div>
+  </div>
+
   <div class="app-shell" id="appShell" style="display: none;">
     <aside class="sidebar">
       <div class="brand">
@@ -31,6 +44,13 @@
           <span class="brand-label">Smart Screener</span>
           <span class="brand-subtitle">Resume Intelligence</span>
         </span>
+      </div>
+
+      <div class="sidebar-card">
+        <div class="sidebar-card-label">Resume Library</div>
+        <div class="library-stats">
+          <span id="libraryCount">0</span> resumes stored
+        </div>
       </div>
 
       <div class="sidebar-card">
@@ -138,14 +158,38 @@
               <div class="empty-files">No resumes selected</div>
             </div>
           </div>
+
+          <div class="save-section">
+            <button class="secondary-button" id="saveResumesBtn">
+              <span>Save to Library</span>
+            </button>
+          </div>
         </section>
+      </section>
+
+      <!-- Resume Library Section -->
+      <section class="panel full-panel">
+        <div class="panel-header">
+          <div>
+            <span class="panel-kicker">03</span>
+            <span class="panel-title">Resume Library</span>
+          </div>
+          <div class="table-actions">
+            <button class="small-button" id="selectAllBtn">Select All</button>
+            <button class="small-button danger" id="deleteSelectedBtn">Delete Selected</button>
+          </div>
+        </div>
+
+        <div class="library-grid" id="libraryGrid">
+          <div class="empty-state">No resumes in library. Upload and save resumes to build your library.</div>
+        </div>
       </section>
 
       <section class="analysis-grid">
         <section class="panel">
           <div class="panel-header">
             <div>
-              <span class="panel-kicker">03</span>
+              <span class="panel-kicker">04</span>
               <span class="panel-title">AI Ranking</span>
             </div>
             <span class="filter-chip">Top 5</span>
@@ -158,7 +202,7 @@
         <section class="panel">
           <div class="panel-header">
             <div>
-              <span class="panel-kicker">04</span>
+              <span class="panel-kicker">05</span>
               <span class="panel-title">Best Candidate</span>
             </div>
           </div>
@@ -171,7 +215,7 @@
       <section class="panel full-panel">
         <div class="panel-header">
           <div>
-            <span class="panel-kicker">05</span>
+            <span class="panel-kicker">06</span>
             <span class="panel-title">Detailed Candidate Ranking</span>
           </div>
           <div class="table-actions">

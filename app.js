@@ -72,6 +72,101 @@ const sampleJobDescription = `Senior Data Analyst with strong business communica
 // Store current ranking data for export
 let currentRankingData = [];
 
+// =====================
+// INDEXEDDB STORAGE
+// =====================
+const DB_NAME = 'SmartScreenerDB';
+const DB_VERSION = 1;
+const STORE_NAME = 'resumes';
+let db = null;
+
+function openDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      db = request.result;
+      resolve(db);
+    };
+
+    request.onupgradeneeded = (event) => {
+      const database = event.target.result;
+      if (!database.objectStoreNames.contains(STORE_NAME)) {
+        const store = database.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
+        store.createIndex('name', 'name', { unique: false });
+        store.createIndex('savedAt', 'savedAt', { unique: false });
+      }
+    };
+  });
+}
+
+function saveResumeToLibrary(resume) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_NAME], 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.add({
+      ...resume,
+      savedAt: new Date().toISOString()
+    });
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function getAllResumes() {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_NAME], 'readonly');
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.getAll();
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function getResumeById(id) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_NAME], 'readonly');
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.get(id);
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function deleteResumeById(id) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_NAME], 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.delete(id);
+
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function deleteMultipleResumes(ids) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_NAME], 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+
+    let completed = 0;
+    ids.forEach(id => {
+      const request = store.delete(id);
+      request.onsuccess = () => {
+        completed++;
+        if (completed === ids.length) resolve();
+      };
+      request.onerror = () => reject(request.error);
+    });
+
+    if (ids.length === 0) resolve();
+  });
+}
+
 const jobDescription = document.getElementById('jobDescription');
 const scanButton = document.getElementById('scanButton');
 const loadJobButton = document.getElementById('loadJobButton');
@@ -528,5 +623,258 @@ dropZone.addEventListener('drop', event => {
   refreshFileList(Array.from(event.dataTransfer.files));
 });
 
+// =====================
+// LIBRARY FUNCTIONALITY
+// =====================
+const libraryGrid = document.getElementById('libraryGrid');
+const libraryCount = document.getElementById('libraryCount');
+const saveResumesBtn = document.getElementById('saveResumesBtn');
+const selectAllBtn = document.getElementById('selectAllBtn');
+const deleteSelectedBtn = document.getElementById('deleteSelectedBtn');
+const resumeModal = document.getElementById('resumeModal');
+const modalTitle = document.getElementById('modalTitle');
+const resumeContent = document.getElementById('resumeContent');
+const closeModal = document.getElementById('closeModal');
+
+let selectedResumeIds = new Set();
+
+function updateLibraryCount(count) {
+  if (libraryCount) {
+    libraryCount.textContent = count;
+  }
+}
+
+function formatDate(isoString) {
+  const date = new Date(isoString);
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+async function renderLibrary() {
+  try {
+    const resumes = await getAllResumes();
+    updateLibraryCount(resumes.length);
+    selectedResumeIds.clear();
+
+    if (resumes.length === 0) {
+      libraryGrid.innerHTML = '<div class="empty-state">No resumes in library. Upload and save resumes to build your library.</div>';
+      return;
+    }
+
+    libraryGrid.innerHTML = '';
+    resumes.sort((a, b) => new Date(b.savedAt) - new Date(a.savedAt));
+
+    resumes.forEach(resume => {
+      const item = document.createElement('div');
+      item.className = 'library-item';
+      item.dataset.id = resume.id;
+
+      item.innerHTML = `
+        <div class="library-item-header">
+          <input type="checkbox" class="library-item-checkbox" data-id="${resume.id}" />
+          <span class="library-item-name">${resume.name || 'Unknown'}</span>
+        </div>
+        <div class="library-item-meta">
+          Saved: ${formatDate(resume.savedAt)}
+        </div>
+        <div class="library-item-actions">
+          <button class="library-item-btn view-btn" data-id="${resume.id}">View</button>
+          <button class="library-item-btn danger delete-btn" data-id="${resume.id}">Delete</button>
+        </div>
+      `;
+
+      libraryGrid.appendChild(item);
+    });
+
+    // Add event listeners
+    document.querySelectorAll('.library-item-checkbox').forEach(checkbox => {
+      checkbox.addEventListener('change', (e) => {
+        const id = parseInt(e.target.dataset.id);
+        const item = e.target.closest('.library-item');
+        if (e.target.checked) {
+          selectedResumeIds.add(id);
+          item.classList.add('selected');
+        } else {
+          selectedResumeIds.delete(id);
+          item.classList.remove('selected');
+        }
+      });
+    });
+
+    document.querySelectorAll('.view-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = parseInt(e.target.dataset.id);
+        await viewResume(id);
+      });
+    });
+
+    document.querySelectorAll('.delete-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = parseInt(e.target.dataset.id);
+        if (confirm('Are you sure you want to delete this resume?')) {
+          await deleteResumeById(id);
+          await renderLibrary();
+        }
+      });
+    });
+
+  } catch (error) {
+    console.error('Error rendering library:', error);
+    libraryGrid.innerHTML = '<div class="empty-state">Error loading library.</div>';
+  }
+}
+
+async function viewResume(id) {
+  try {
+    const resume = await getResumeById(id);
+    if (resume) {
+      modalTitle.textContent = resume.name || 'Resume';
+      resumeContent.textContent = resume.content || resume.resume || 'No content available';
+      resumeModal.style.display = 'flex';
+    }
+  } catch (error) {
+    console.error('Error viewing resume:', error);
+    alert('Error loading resume.');
+  }
+}
+
+function closeResumeModal() {
+  resumeModal.style.display = 'none';
+}
+
+async function saveUploadedResumes() {
+  const uploadFiles = Array.from(resumeFiles.files);
+
+  if (uploadFiles.length === 0) {
+    alert('Please upload resumes first.');
+    return;
+  }
+
+  saveResumesBtn.disabled = true;
+  saveResumesBtn.innerHTML = '<span>Saving...</span>';
+
+  try {
+    for (const file of uploadFiles) {
+      const text = await file.text();
+      const contactInfo = extractContactInfo(text);
+      const roleInfo = extractCurrentRole(text);
+
+      await saveResumeToLibrary({
+        name: file.name.replace(/\.[^/.]+$/, '').split(/[_-]/).map(capitalize).join(' '),
+        fileName: file.name,
+        content: text,
+        resume: text,
+        email: contactInfo.email,
+        phone: contactInfo.phone,
+        linkedin: contactInfo.linkedin,
+        location: extractLocation(text),
+        experience: extractExperience(text),
+        currentRole: roleInfo.currentRole,
+        currentCompany: roleInfo.currentCompany,
+        education: extractEducation(text)
+      });
+    }
+
+    await renderLibrary();
+    alert(`${uploadFiles.length} resume(s) saved to library.`);
+
+    // Clear the file input
+    resumeFiles.value = '';
+    refreshFileList([]);
+
+  } catch (error) {
+    console.error('Error saving resumes:', error);
+    alert('Error saving resumes. Please try again.');
+  } finally {
+    saveResumesBtn.disabled = false;
+    saveResumesBtn.innerHTML = '<span>Save to Library</span>';
+  }
+}
+
+function toggleSelectAll() {
+  const checkboxes = document.querySelectorAll('.library-item-checkbox');
+  const allSelected = selectedResumeIds.size === checkboxes.length && checkboxes.length > 0;
+
+  checkboxes.forEach(checkbox => {
+    const id = parseInt(checkbox.dataset.id);
+    const item = checkbox.closest('.library-item');
+
+    if (allSelected) {
+      checkbox.checked = false;
+      selectedResumeIds.delete(id);
+      item.classList.remove('selected');
+    } else {
+      checkbox.checked = true;
+      selectedResumeIds.add(id);
+      item.classList.add('selected');
+    }
+  });
+
+  selectAllBtn.textContent = allSelected ? 'Select All' : 'Deselect All';
+}
+
+async function deleteSelectedResumes() {
+  if (selectedResumeIds.size === 0) {
+    alert('Please select resumes to delete.');
+    return;
+  }
+
+  if (!confirm(`Are you sure you want to delete ${selectedResumeIds.size} resume(s)?`)) {
+    return;
+  }
+
+  try {
+    await deleteMultipleResumes(Array.from(selectedResumeIds));
+    await renderLibrary();
+    selectAllBtn.textContent = 'Select All';
+  } catch (error) {
+    console.error('Error deleting resumes:', error);
+    alert('Error deleting resumes. Please try again.');
+  }
+}
+
+// Library event listeners
+if (saveResumesBtn) {
+  saveResumesBtn.addEventListener('click', saveUploadedResumes);
+}
+
+if (selectAllBtn) {
+  selectAllBtn.addEventListener('click', toggleSelectAll);
+}
+
+if (deleteSelectedBtn) {
+  deleteSelectedBtn.addEventListener('click', deleteSelectedResumes);
+}
+
+if (closeModal) {
+  closeModal.addEventListener('click', closeResumeModal);
+}
+
+if (resumeModal) {
+  resumeModal.addEventListener('click', (e) => {
+    if (e.target === resumeModal) {
+      closeResumeModal();
+    }
+  });
+}
+
+// Initialize database and load library
+async function initializeApp() {
+  try {
+    await openDatabase();
+    await renderLibrary();
+  } catch (error) {
+    console.error('Error initializing database:', error);
+  }
+}
+
 // Initialize empty state
 updateDashboardMetrics([]);
+
+// Initialize the app when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeApp);
+} else {
+  initializeApp();
+}

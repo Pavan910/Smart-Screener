@@ -187,69 +187,114 @@ function openDatabase() {
   });
 }
 
-function saveResumeToLibrary(resume) {
+async function saveResumeToLibrary(resume) {
+  // Ensure database is initialized
+  if (!db) {
+    await openDatabase();
+  }
+
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_NAME], 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.add({
-      ...resume,
-      savedAt: new Date().toISOString()
-    });
+    try {
+      const transaction = db.transaction([STORE_NAME], 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.add({
+        ...resume,
+        savedAt: new Date().toISOString()
+      });
 
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-function getAllResumes() {
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_NAME], 'readonly');
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.getAll();
-
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-function getResumeById(id) {
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_NAME], 'readonly');
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.get(id);
-
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-function deleteResumeById(id) {
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_NAME], 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.delete(id);
-
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
-  });
-}
-
-function deleteMultipleResumes(ids) {
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_NAME], 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
-
-    let completed = 0;
-    ids.forEach(id => {
-      const request = store.delete(id);
-      request.onsuccess = () => {
-        completed++;
-        if (completed === ids.length) resolve();
-      };
+      request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
-    });
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
 
-    if (ids.length === 0) resolve();
+async function getAllResumes() {
+  // Ensure database is initialized
+  if (!db) {
+    await openDatabase();
+  }
+
+  return new Promise((resolve, reject) => {
+    try {
+      const transaction = db.transaction([STORE_NAME], 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.getAll();
+
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+async function getResumeById(id) {
+  if (!db) {
+    await openDatabase();
+  }
+
+  return new Promise((resolve, reject) => {
+    try {
+      const transaction = db.transaction([STORE_NAME], 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.get(id);
+
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+async function deleteResumeById(id) {
+  if (!db) {
+    await openDatabase();
+  }
+
+  return new Promise((resolve, reject) => {
+    try {
+      const transaction = db.transaction([STORE_NAME], 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.delete(id);
+
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+async function deleteMultipleResumes(ids) {
+  if (!db) {
+    await openDatabase();
+  }
+
+  return new Promise((resolve, reject) => {
+    try {
+      if (ids.length === 0) {
+        resolve();
+        return;
+      }
+
+      const transaction = db.transaction([STORE_NAME], 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+
+      let completed = 0;
+      ids.forEach(id => {
+        const request = store.delete(id);
+        request.onsuccess = () => {
+          completed++;
+          if (completed === ids.length) resolve();
+        };
+        request.onerror = () => reject(request.error);
+      });
+    } catch (error) {
+      reject(error);
+    }
   });
 }
 
@@ -721,13 +766,16 @@ function renderBestCandidate(ranking) {
 }
 
 function updateDashboardMetrics(ranking) {
+  const metricScanned = document.getElementById('metricScanned');
+  const metricTopScore = document.getElementById('metricTopScore');
+  const metricCoverage = document.getElementById('metricCoverage');
+  const metricShortlist = document.getElementById('metricShortlist');
+
   if (!ranking || ranking.length === 0) {
-    document.getElementById('metricScanned').textContent = '00';
-    document.getElementById('metricTopScore').textContent = '--';
-    document.getElementById('metricCoverage').textContent = '--';
-    document.getElementById('metricShortlist').textContent = '00';
-    document.getElementById('pipelineBar').style.width = '0%';
-    document.getElementById('pipelineScore').textContent = '0%';
+    if (metricScanned) metricScanned.textContent = '00';
+    if (metricTopScore) metricTopScore.textContent = '--';
+    if (metricCoverage) metricCoverage.textContent = '--';
+    if (metricShortlist) metricShortlist.textContent = '00';
     return;
   }
 
@@ -737,12 +785,10 @@ function updateDashboardMetrics(ranking) {
   const shortlisted = ranking.filter(item => item.score >= 85).length;
   const avgScore = Math.round(ranking.reduce((sum, r) => sum + (r.score || 0), 0) / total);
 
-  document.getElementById('metricScanned').textContent = String(total).padStart(2, '0');
-  document.getElementById('metricTopScore').textContent = String(top.score || 0);
-  document.getElementById('metricCoverage').textContent = avgScore + '%';
-  document.getElementById('metricShortlist').textContent = String(shortlisted).padStart(2, '0');
-  document.getElementById('pipelineBar').style.width = avgScore + '%';
-  document.getElementById('pipelineScore').textContent = avgScore + '%';
+  if (metricScanned) metricScanned.textContent = String(total).padStart(2, '0');
+  if (metricTopScore) metricTopScore.textContent = String(top.score || 0);
+  if (metricCoverage) metricCoverage.textContent = avgScore + '%';
+  if (metricShortlist) metricShortlist.textContent = String(shortlisted).padStart(2, '0');
 }
 
 function refreshFileList(files, showLimitWarning = false) {

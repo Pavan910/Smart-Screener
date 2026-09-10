@@ -84,35 +84,49 @@ def extract_resume_with_ai(resume_text, job_description=""):
 
     jd_context = f"\nJOB DESCRIPTION (match skills against this):\n{job_description[:800]}\n" if job_description else ""
 
-    prompt = f"""You are an expert HR resume parser. Extract information from this resume with high accuracy.
+    prompt = f"""You are an expert HR resume parser. Extract information from this resume.
 
-IMPORTANT RULES:
-1. NAME: Extract the candidate's full name (usually at the top). Do NOT include words like "Resume", "CV", "Updated" in the name.
-2. LOCATION: Extract the city/location where the candidate is based. Look for city names in contact section or address.
-3. EXPERIENCE: Calculate total years of professional experience from work history dates. If explicit "X years experience" is mentioned, use that.
-4. CURRENT ROLE: Extract the EXACT job title from the MOST RECENT job position. This should be a proper job title like "Software Engineer", "HR Manager", "Data Analyst" - NOT descriptive text.
-5. SKILLS: Extract ALL skills mentioned in the resume - programming languages, tools, frameworks, soft skills, domain expertise, certifications. Read the entire resume carefully.
+EXTRACTION RULES:
+1. NAME: The candidate's full name (first + last name). Located at the top of resume. NEVER include "Resume", "CV", "Updated" etc.
+
+2. LOCATION: City where candidate is based. Look near contact info or address section.
+
+3. EXPERIENCE: Total years of professional work experience. Calculate from job dates or use explicitly mentioned "X years experience".
+
+4. CURRENT ROLE: The job title from the MOST RECENT position. Examples:
+   - "Software Engineer" NOT "worked on software projects"
+   - "HR Executive" NOT "handling HR operations"
+   - "Data Analyst" NOT "analyzing data"
+   Look in the Work Experience or Employment section for the first/most recent job.
+
+5. SKILLS: Extract ALL skills mentioned anywhere in the resume:
+   - Technical: Programming languages, frameworks, databases, tools
+   - Software: Excel, SAP, Salesforce, MS Office, etc.
+   - Domain: Finance, HR, Marketing, Operations, etc.
+   - Soft skills: Communication, Leadership, Problem-solving, etc.
+   - Certifications: Any mentioned certifications
+   List at least 10-15 skills if available.
 {jd_context}
 RESUME TEXT:
-{resume_text[:4000]}
+{resume_text[:4500]}
 
-Return ONLY this JSON (no explanation, no markdown):
+Respond with ONLY valid JSON (no markdown, no explanation):
 {{
-  "name": "candidate full name only",
-  "email": "email@example.com",
-  "phone": "+91XXXXXXXXXX or similar",
-  "location": "City name",
-  "experience_years": number (integer),
-  "current_role": "exact job title from most recent position",
-  "current_company": "most recent company name",
-  "education": "highest degree (e.g., B.Tech, MBA, etc.)",
-  "skills": ["skill1", "skill2", "skill3", ...]
+  "name": "First Last",
+  "email": "email@domain.com",
+  "phone": "phone number",
+  "location": "City",
+  "experience_years": 0,
+  "current_role": "Job Title",
+  "current_company": "Company Name",
+  "education": "Degree",
+  "skills": ["Skill1", "Skill2", "Skill3", "Skill4", "Skill5"]
 }}"""
 
     response = call_ai_api([
-        {"role": "system", "content": "You are a precise resume parser. Extract data exactly as it appears in the resume. For current_role, extract the actual job title, not descriptive text. For skills, list ALL skills found including technical, soft skills, tools, and certifications."},
+        {"role": "system", "content": "Parse resumes accurately. Extract the actual job title from work experience, not job descriptions. List all skills found in the resume."},
         {"role": "user", "content": prompt}
-    ], max_tokens=1000)
+    ], max_tokens=1200)
 
     if response:
         try:
@@ -208,27 +222,52 @@ def extract_resume_basic(resume_text):
             if exp_years > 40:  # Sanity check
                 exp_years = 0
 
-    # Current role - look for job title patterns near "Present" or recent dates
+    # Current role - look for job title in work experience section
     current_role = ''
-    role_keywords = ['engineer', 'developer', 'analyst', 'manager', 'lead', 'specialist',
-                     'consultant', 'designer', 'architect', 'coordinator', 'executive',
-                     'officer', 'director', 'head', 'associate', 'scientist', 'recruiter',
-                     'administrator', 'representative', 'accountant']
+    in_work_section = False
 
-    for i, line in enumerate(lines[:40]):
-        line_lower = line.lower().strip()
-        # Check if line contains a role keyword and is near dates or "present"
-        for keyword in role_keywords:
-            if keyword in line_lower and len(line.strip()) < 80:
-                # Check if this looks like a job title (not a bullet point or sentence)
-                if not line.strip().startswith('•') and not line.strip().startswith('-'):
-                    # Extract potential title
-                    title_match = re.match(r'^([A-Z][A-Za-z\s\-]+(?:Engineer|Developer|Analyst|Manager|Lead|Specialist|Consultant|Designer|Architect|Coordinator|Executive|Officer|Director|Associate|Scientist|Recruiter|Administrator|Representative|Accountant))', line.strip(), re.I)
-                    if title_match:
-                        current_role = title_match.group(1).strip()
+    for i, line in enumerate(lines[:50]):
+        line_clean = line.strip()
+        line_lower = line_clean.lower()
+
+        # Detect work experience section
+        if re.match(r'^(work\s*experience|professional\s*experience|employment|career)', line_lower):
+            in_work_section = True
+            continue
+
+        # Exit work section on other headers
+        if re.match(r'^(education|skills|certifications|projects|achievements|summary)', line_lower):
+            if in_work_section and current_role:
+                break
+            in_work_section = False
+            continue
+
+        if in_work_section and not current_role:
+            # Skip empty lines and bullet points
+            if not line_clean or line_clean.startswith('•') or line_clean.startswith('-'):
+                continue
+
+            # Look for role with date pattern: "HR Executive | Jan 2020 - Present"
+            role_date_match = re.match(r'^([A-Za-z][A-Za-z\s\-]+)\s*[|–\-]\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|\d{4}|Present)', line_clean, re.I)
+            if role_date_match:
+                potential_role = role_date_match.group(1).strip()
+                if len(potential_role) > 3 and len(potential_role) < 50:
+                    current_role = potential_role
+                    break
+
+            # Look for standalone job title
+            job_titles = ['Engineer', 'Developer', 'Analyst', 'Manager', 'Executive', 'Specialist',
+                          'Consultant', 'Designer', 'Lead', 'Officer', 'Coordinator', 'Administrator',
+                          'Representative', 'Accountant', 'Recruiter', 'Associate', 'Director', 'Head',
+                          'Trainee', 'Intern', 'Assistant', 'Supervisor']
+
+            for title in job_titles:
+                if title.lower() in line_lower and len(line_clean) < 60:
+                    if not line_clean.startswith(('•', '-', '*', '–')):
+                        current_role = line_clean
                         break
-        if current_role:
-            break
+            if current_role:
+                break
 
     # Education - find degree patterns
     education = ''

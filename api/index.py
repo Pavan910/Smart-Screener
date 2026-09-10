@@ -284,14 +284,14 @@ TASK:
 1. Find skills/requirements FROM THE JOB DESCRIPTION that the candidate HAS
 2. Find skills/requirements FROM THE JOB DESCRIPTION that the candidate is MISSING
 3. Score 0-100 based on how well candidate matches the JOB requirements
-4. Recommend: "Shortlist" (75+), "Review" (50-74), or "Pool" (<50)
+4. Recommend based on score: "Best" (80+), "Good" (65-79), "Average" (50-64), or "Poor" (<50)
 
 Return ONLY JSON:
 {{
   "score": number,
   "matched_skills": ["job requirements the candidate meets"],
   "missing_skills": ["job requirements the candidate lacks"],
-  "recommendation": "Shortlist" or "Review" or "Pool"
+  "recommendation": "Best" or "Good" or "Average" or "Poor"
 }}"""
 
     response = call_ai_api([
@@ -359,13 +359,15 @@ def match_skills_basic(resume_data, job_text):
 
     total_score = min(95, max(35, skill_score + exp_score + role_score))
 
-    # Recommendation
-    if total_score >= 75:
-        recommendation = "Shortlist"
+    # Recommendation - intuitive labels
+    if total_score >= 80:
+        recommendation = "Best"
+    elif total_score >= 65:
+        recommendation = "Good"
     elif total_score >= 50:
-        recommendation = "Review"
+        recommendation = "Average"
     else:
-        recommendation = "Pool"
+        recommendation = "Poor"
 
     return {
         "score": total_score,

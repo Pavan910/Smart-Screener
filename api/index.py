@@ -1,5 +1,4 @@
 from flask import Flask, request, jsonify, make_response
-import json
 import re
 import os
 import hashlib
@@ -13,90 +12,155 @@ def get_password():
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
-skill_library = {
-    "python": ["python", "pandas", "numpy", "scikit-learn", "jupyter", "flask", "django", "fastapi"],
-    "sql": ["sql", "postgres", "postgresql", "mysql", "database", "query", "oracle", "sqlite", "mongodb", "nosql"],
-    "dashboard": ["dashboard", "tableau", "power bi", "powerbi", "bi", "reporting", "looker", "metabase", "superset"],
-    "business communication": ["business communication", "business stakeholder", "stakeholder management", "communication", "executive", "presentation", "client facing"],
-    "analytics": ["analytics", "data analysis", "kpi", "insights", "metrics", "statistical analysis", "data-driven"],
-    "machine learning": ["machine learning", "ml", "deep learning", "neural network", "tensorflow", "pytorch", "keras", "nlp", "computer vision"],
-    "excel": ["excel", "spreadsheet", "pivot table", "vlookup", "macro", "vba"],
-    "data visualization": ["visualization", "charts", "graphs", "data viz", "matplotlib", "seaborn", "plotly", "d3"],
-    "cloud": ["aws", "azure", "gcp", "google cloud", "cloud computing", "s3", "ec2", "lambda"],
-    "etl": ["etl", "data pipeline", "data engineering", "airflow", "spark", "hadoop", "data warehouse"],
-    "leadership": ["leadership", "team lead", "manager", "managed", "mentored", "supervised", "coordinated"],
-    "agile": ["agile", "scrum", "sprint", "kanban", "jira", "product owner"],
-    "java": ["java", "spring", "spring boot", "hibernate", "maven"],
-    "javascript": ["javascript", "react", "angular", "vue", "node", "nodejs", "typescript"],
-    "project management": ["project management", "pmp", "program management", "roadmap", "milestone"],
+# Common words to ignore when extracting keywords
+STOP_WORDS = {
+    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with",
+    "by", "from", "as", "is", "are", "was", "were", "be", "been", "being", "have", "has",
+    "had", "do", "does", "did", "will", "would", "could", "should", "may", "might", "must",
+    "shall", "can", "need", "dare", "ought", "used", "it", "its", "this", "that", "these",
+    "those", "i", "you", "he", "she", "we", "they", "what", "which", "who", "whom", "whose",
+    "where", "when", "why", "how", "all", "each", "every", "both", "few", "more", "most",
+    "other", "some", "such", "no", "nor", "not", "only", "own", "same", "so", "than", "too",
+    "very", "just", "also", "now", "here", "there", "then", "once", "if", "any", "about",
+    "into", "through", "during", "before", "after", "above", "below", "between", "under",
+    "over", "out", "up", "down", "off", "again", "further", "able", "our", "your", "their",
+    "etc", "including", "work", "working", "experience", "years", "year", "strong", "good",
+    "excellent", "preferred", "required", "requirements", "responsibilities", "role", "position",
+    "job", "candidate", "looking", "seeking", "must", "ability", "skills", "skill"
 }
-
-sample_candidates = [
-    {
-        "name": "Olivia Johnson",
-        "title": "Senior Data Analyst",
-        "experience": 7,
-        "email": "olivia.johnson@example.com",
-        "skills": ["python", "sql", "dashboard", "business communication"],
-        "resume": "Olivia Johnson is a Senior Data Analyst with 7 years of experience in Python, SQL, business intelligence dashboards, and stakeholder communication."
-    },
-    {
-        "name": "Harper Lee",
-        "title": "Business Intelligence Lead",
-        "experience": 6,
-        "email": "harper.lee@example.com",
-        "skills": ["sql", "dashboard", "business communication"],
-        "resume": "Harper Lee brings 6 years of analytics experience in dashboard design and SQL analytics."
-    },
-    {
-        "name": "Sophia Brown",
-        "title": "Analytics Manager",
-        "experience": 5,
-        "email": "sophia.brown@example.com",
-        "skills": ["sql", "dashboard", "business communication"],
-        "resume": "Sophia Brown has 5 years of analytics experience with dashboard delivery and business data storytelling."
-    },
-    {
-        "name": "Evelyn Smith",
-        "title": "Data Science Specialist",
-        "experience": 4,
-        "email": "evelyn.smith@example.com",
-        "skills": ["python", "machine learning", "sql"],
-        "resume": "Evelyn Smith has 4 years of work in Python, data science, classification, and SQL modeling."
-    }
-]
-
-def sample_job_description():
-    return "Senior Data Analyst with strong business communication, SQL, Python, dashboard design, stakeholder management."
 
 def normalize_text(text):
     return re.sub(r"[^a-z0-9\s-]", " ", text.lower())
 
-def extract_skills(job_text):
-    normalized = normalize_text(job_text)
-    found = []
-    for key, synonyms in skill_library.items():
-        if any(s in normalized for s in synonyms):
-            found.append(key)
-    return found
+def extract_keywords_from_text(text, min_length=3):
+    """Extract meaningful keywords from any text (job description or resume)"""
+    normalized = normalize_text(text)
+    words = re.findall(r'\b[a-z][a-z0-9+#.-]*\b', normalized)
+
+    # Filter out stop words and short words
+    keywords = []
+    for word in words:
+        if len(word) >= min_length and word not in STOP_WORDS:
+            keywords.append(word)
+
+    # Also extract multi-word phrases (2-3 words)
+    phrases = re.findall(r'\b([a-z]+\s+[a-z]+(?:\s+[a-z]+)?)\b', normalized)
+    for phrase in phrases:
+        words_in_phrase = phrase.split()
+        # Keep phrase if it's not all stop words
+        if not all(w in STOP_WORDS for w in words_in_phrase):
+            keywords.append(phrase.replace(' ', '_'))
+
+    return list(set(keywords))
+
+def extract_name_from_resume(text):
+    """Extract candidate name from resume text - usually at the top"""
+    lines = [l.strip() for l in text.split('\n') if l.strip()]
+
+    for i, line in enumerate(lines[:5]):
+        # Skip common headers
+        if re.match(r'^(resume|curriculum|cv|profile|summary|objective|contact|address|phone|email|linkedin)', line, re.I):
+            continue
+        # Skip emails, URLs, phone numbers
+        if re.search(r'@|http|www\.|\.com|\.org|\.net', line, re.I):
+            continue
+        if re.match(r'^\+?\d[\d\s\-().]{8,}', line):
+            continue
+        if len(line) > 50 or len(line) < 3:
+            continue
+
+        # Check for name pattern (2-4 capitalized words)
+        match = re.match(r'^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})$', line)
+        if match:
+            return match.group(1)
+
+        # First line with 2-4 capitalized words
+        if i == 0:
+            words = line.split()
+            if 2 <= len(words) <= 4 and all(w[0].isupper() for w in words if w):
+                return line
+
+    return None
+
+def extract_email_from_resume(text):
+    """Extract email from resume text"""
+    match = re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
+    return match.group(0) if match else ''
+
+def extract_phone_from_resume(text):
+    """Extract phone from resume text"""
+    patterns = [
+        r'(?:\+91[\s-]?)?[6-9]\d{9}',  # Indian mobile
+        r'(?:\+1[\s-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}',  # US format
+        r'\+\d{1,3}[\s-]?\d{6,14}'  # International
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return re.sub(r'\s+', '', match.group(0))
+    return ''
+
+def extract_experience_from_resume(text):
+    """Extract years of experience from resume text"""
+    patterns = [
+        r'(\d+)\+?\s*(?:years?|yrs?)[\s\w]*(?:of\s+)?(?:experience|exp|in)',
+        r'(?:experience|exp)[\s:]*(\d+)\+?\s*(?:years?|yrs?)',
+        r'(?:total|overall)[\s\w]*(\d+)\+?\s*(?:years?|yrs?)'
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, re.I)
+        if match:
+            return int(match.group(1))
+    return 0
 
 def analyze_resumes(job_text, candidates):
-    skills = extract_skills(job_text)
+    """
+    Analyze resumes against job description using dynamic keyword matching.
+    Works for ANY type of job - technical, non-technical, or mixed.
+    """
+    # Extract keywords from job description
+    job_keywords = extract_keywords_from_text(job_text)
+
     ranking = []
     for c in candidates:
         resume_text = c.get("resume", "")
         normalized_resume = normalize_text(resume_text)
-        custom_skills = []
-        for skill_key, synonyms in skill_library.items():
-            if any(s in normalized_resume for s in synonyms):
-                custom_skills.append(skill_key)
-        covered = [s for s in skills if s in custom_skills]
-        missing = [s for s in skills if s not in custom_skills]
-        skill_score = round((len(covered) / max(len(skills), 1)) * 60)
+
+        # Extract keywords from resume
+        resume_keywords = extract_keywords_from_text(resume_text)
+
+        # Find matching keywords between job and resume
+        matched_keywords = []
+        missing_keywords = []
+
+        for keyword in job_keywords:
+            # Check both exact match and word presence
+            keyword_clean = keyword.replace('_', ' ')
+            if keyword in resume_keywords or keyword_clean in normalized_resume:
+                matched_keywords.append(keyword_clean)
+            else:
+                missing_keywords.append(keyword_clean)
+
+        # Calculate match percentage
+        total_job_keywords = len(job_keywords) if job_keywords else 1
+        match_percentage = len(matched_keywords) / total_job_keywords
+
+        # Score breakdown:
+        # - Keyword match: up to 70 points (main factor)
+        # - Experience bonus: up to 15 points
+        # - Content length/depth: up to 15 points
+
+        keyword_score = round(match_percentage * 70)
+
         exp = c.get("experience") or 0
-        exp_score = min(14, max(exp - 2, 0) * 2) if exp > 0 else 0
-        keyword_score = min(16, sum(1 for word in re.findall(r"[a-z0-9]+", normalize_text(job_text)) if word and len(word) >= 3 and word in normalized_resume))
-        score = min(96, max(40, int(skill_score + exp_score + keyword_score)))
+        exp_score = min(15, exp * 2) if exp > 0 else 0
+
+        # Content depth score (longer, more detailed resumes score slightly higher)
+        content_length = len(resume_text)
+        depth_score = min(15, content_length // 500)  # 1 point per 500 chars, max 15
+
+        total_score = min(100, max(0, keyword_score + exp_score + depth_score))
+
         ranking.append({
             "name": c.get("name", "Unknown"),
             "title": c.get("title") or c.get("currentRole") or "",
@@ -108,13 +172,15 @@ def analyze_resumes(job_text, candidates):
             "currentRole": c.get("currentRole") or c.get("title") or "",
             "currentCompany": c.get("currentCompany") or "",
             "education": c.get("education") or "",
-            "skills": list(set(c.get("skills", []) + custom_skills)),
-            "coveredSkills": covered,
-            "missingSkills": missing,
-            "score": score,
+            "skills": matched_keywords[:10],  # Top 10 matched skills
+            "coveredSkills": matched_keywords,
+            "missingSkills": missing_keywords[:10],  # Top 10 missing
+            "score": total_score,
+            "matchPercentage": round(match_percentage * 100),
             "resumeText": resume_text[:180],
-            "analyzedBy": "keyword-matching"
+            "analyzedBy": "dynamic-keyword-matching"
         })
+
     ranking.sort(key=lambda x: x["score"], reverse=True)
     return ranking
 
@@ -129,11 +195,13 @@ def catch_all(path):
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
         return response
 
-    # Handle GET
+    # Handle GET - API info endpoint
     if request.method == 'GET':
-        job_text = sample_job_description()
-        ranking = analyze_resumes(job_text, sample_candidates)
-        response = jsonify({"ranking": ranking, "candidateCount": len(ranking)})
+        response = jsonify({
+            "api": "Smart Screener",
+            "version": "1.0",
+            "message": "Use POST to analyze resumes"
+        })
         response.headers['Access-Control-Allow-Origin'] = '*'
         return response
 
@@ -162,44 +230,59 @@ def catch_all(path):
             return response
 
         # Ranking request
-        job_text = data.get("jobDescription") or sample_job_description()
+        job_text = data.get("jobDescription") or ""
         uploaded = data.get("resumes") or []
 
-        # Only use uploaded resumes if provided, otherwise fall back to sample data
-        if uploaded:
-            candidates = []
-            for i, item in enumerate(uploaded):
-                if isinstance(item, dict):
-                    resume_text = item.get("resume") or item.get("text") or item.get("content") or ""
-                    name = item.get("name") or f"Candidate {i+1}"
-                    # Use metadata from frontend extraction
-                    candidates.append({
-                        "name": name,
-                        "title": item.get("currentRole") or item.get("title") or "",
-                        "experience": item.get("experience") or 0,
-                        "email": item.get("email") or "",
-                        "phone": item.get("phone") or "",
-                        "location": item.get("location") or "",
-                        "linkedin": item.get("linkedin") or "",
-                        "currentRole": item.get("currentRole") or "",
-                        "currentCompany": item.get("currentCompany") or "",
-                        "education": item.get("education") or "",
-                        "skills": item.get("skills") or [],
-                        "resume": resume_text
-                    })
-                else:
-                    resume_text = str(item)
-                    candidates.append({
-                        "name": f"Candidate {i+1}",
-                        "title": "",
-                        "experience": 0,
-                        "email": "",
-                        "skills": [],
-                        "resume": resume_text
-                    })
-        else:
-            # Only use sample data if no resumes uploaded (for demo/testing)
-            candidates = list(sample_candidates)
+        # Validate inputs
+        if not job_text:
+            response = jsonify({"error": "Job description is required", "ranking": []})
+            response.status_code = 400
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            return response
+
+        if not uploaded:
+            response = jsonify({"error": "No resumes provided", "ranking": []})
+            response.status_code = 400
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            return response
+
+        # Process uploaded resumes
+        candidates = []
+        for i, item in enumerate(uploaded):
+            if isinstance(item, dict):
+                resume_text = item.get("resume") or item.get("text") or item.get("content") or ""
+
+                # Use frontend extraction, but fallback to server-side extraction
+                name = item.get("name") or extract_name_from_resume(resume_text) or f"Candidate {i+1}"
+                email = item.get("email") or extract_email_from_resume(resume_text)
+                phone = item.get("phone") or extract_phone_from_resume(resume_text)
+                experience = item.get("experience") or extract_experience_from_resume(resume_text)
+
+                candidates.append({
+                    "name": name,
+                    "title": item.get("currentRole") or item.get("title") or "",
+                    "experience": experience,
+                    "email": email,
+                    "phone": phone,
+                    "location": item.get("location") or "",
+                    "linkedin": item.get("linkedin") or "",
+                    "currentRole": item.get("currentRole") or "",
+                    "currentCompany": item.get("currentCompany") or "",
+                    "education": item.get("education") or "",
+                    "skills": item.get("skills") or [],
+                    "resume": resume_text
+                })
+            else:
+                resume_text = str(item)
+                candidates.append({
+                    "name": extract_name_from_resume(resume_text) or f"Candidate {i+1}",
+                    "title": "",
+                    "experience": extract_experience_from_resume(resume_text),
+                    "email": extract_email_from_resume(resume_text),
+                    "phone": extract_phone_from_resume(resume_text),
+                    "skills": [],
+                    "resume": resume_text
+                })
 
         ranking = analyze_resumes(job_text, candidates)
         response = jsonify({

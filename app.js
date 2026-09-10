@@ -213,52 +213,139 @@ function capitalize(value) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+// Extract candidate name from resume text
+function extractCandidateName(text, fileName) {
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+  // Try to find name in first few lines (usually at the top of resume)
+  for (let i = 0; i < Math.min(lines.length, 5); i++) {
+    const line = lines[i];
+
+    // Skip lines that look like headers, emails, phones, or URLs
+    if (line.match(/^(resume|curriculum|cv|profile|summary|objective|contact|address|phone|email|linkedin)/i)) continue;
+    if (line.match(/@|http|www\.|\.com|\.org|\.net/i)) continue;
+    if (line.match(/^\+?\d[\d\s\-().]{8,}/)) continue; // Phone numbers
+    if (line.length > 50) continue; // Too long to be a name
+    if (line.length < 3) continue; // Too short
+
+    // Check if it looks like a name (2-4 capitalized words)
+    const namePattern = /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})$/;
+    const match = line.match(namePattern);
+    if (match) {
+      return match[1];
+    }
+
+    // Also try: "Name: John Doe" format
+    const labeledName = line.match(/^(?:name|candidate|applicant):\s*(.+)/i);
+    if (labeledName) {
+      return labeledName[1].trim();
+    }
+
+    // If first line has 2-4 words and starts with capital, likely a name
+    if (i === 0) {
+      const words = line.split(/\s+/);
+      if (words.length >= 2 && words.length <= 4 && words.every(w => /^[A-Z]/.test(w))) {
+        return line;
+      }
+    }
+  }
+
+  // Fallback to cleaned filename
+  return fileName.replace(/\.[^/.]+$/, '').split(/[_-]/).map(capitalize).join(' ');
+}
+
 // Extract contact info from resume text
 function extractContactInfo(text) {
-  const emailMatch = text.match(/[\w.-]+@[\w.-]+\.\w+/);
-  const phoneMatch = text.match(/(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/);
-  const linkedinMatch = text.match(/linkedin\.com\/in\/[\w-]+/i);
+  // Better email pattern
+  const emailMatch = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+
+  // Better phone pattern - handles various formats
+  const phonePatterns = [
+    /(?:\+91[\s-]?)?[6-9]\d{9}/, // Indian mobile
+    /(?:\+1[\s-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/, // US format
+    /\+\d{1,3}[\s-]?\d{6,14}/ // International
+  ];
+
+  let phone = '';
+  for (const pattern of phonePatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      phone = match[0].replace(/\s+/g, '');
+      break;
+    }
+  }
+
+  const linkedinMatch = text.match(/(?:linkedin\.com\/in\/|linkedin:\s*)([a-zA-Z0-9_-]+)/i);
 
   return {
     email: emailMatch ? emailMatch[0] : '',
-    phone: phoneMatch ? phoneMatch[0] : '',
-    linkedin: linkedinMatch ? 'https://' + linkedinMatch[0] : ''
+    phone: phone,
+    linkedin: linkedinMatch ? 'https://linkedin.com/in/' + linkedinMatch[1] : ''
   };
 }
 
 // Extract location from resume text
 function extractLocation(text) {
   const locationPatterns = [
-    /(?:Location|Address|City):\s*([^\n,]+(?:,\s*[^\n]+)?)/i,
+    // Labeled locations
+    /(?:Location|Address|City|Based in|residing at):\s*([^\n|,]+(?:,\s*[^\n|]+)?)/i,
+    // City, State/Country format
+    /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*,\s*(?:India|USA|UK|Canada|Australia|[A-Z]{2}))/,
+    // Indian cities
+    /(Mumbai|Delhi|Bangalore|Bengaluru|Hyderabad|Chennai|Kolkata|Pune|Ahmedabad|Jaipur|Noida|Gurgaon|Gurugram)/i,
+    // US states
     /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*,\s*(?:CA|NY|TX|FL|WA|IL|PA|OH|GA|NC|MI|NJ|VA|AZ|MA|TN|IN|MO|MD|WI|CO|MN|SC|AL|LA|KY|OR|OK|CT|UT|IA|NV|AR|MS|KS|NM|NE|WV|ID|HI|NH|ME|MT|RI|DE|SD|ND|AK|VT|WY|DC))/,
-    /(Remote|Hybrid|On-site)/i
+    // Remote/Hybrid
+    /(Remote|Hybrid|On-site|Work from home)/i
   ];
 
   for (const pattern of locationPatterns) {
     const match = text.match(pattern);
-    if (match) return match[1] || match[0];
+    if (match) return (match[1] || match[0]).trim();
   }
   return '';
 }
 
-// Extract experience info
+// Extract experience info - more robust
 function extractExperience(text) {
-  const expMatch = text.match(/(\d+)\+?\s*(?:years?|yrs?)\s*(?:of\s*)?(?:experience|exp)?/i);
-  return expMatch ? parseInt(expMatch[1]) : 0;
+  const patterns = [
+    /(\d+)\+?\s*(?:years?|yrs?)[\s\w]*(?:of\s+)?(?:experience|exp|in)/i,
+    /(?:experience|exp)[\s:]*(\d+)\+?\s*(?:years?|yrs?)/i,
+    /(?:total|overall)[\s\w]*(\d+)\+?\s*(?:years?|yrs?)/i,
+    /(\d+)\+?\s*(?:years?|yrs?)[\s\w]*(?:professional|work|industry)/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) return parseInt(match[1]);
+  }
+  return 0;
 }
 
-// Extract current role and company
+// Extract current role and company - improved
 function extractCurrentRole(text) {
-  const lines = text.split('\n');
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
   let currentRole = '';
   let currentCompany = '';
 
-  for (let i = 0; i < Math.min(lines.length, 20); i++) {
-    const line = lines[i].trim();
-    if (line.match(/^(Senior|Junior|Lead|Principal|Staff|Chief|Head|Director|Manager|Engineer|Developer|Analyst|Specialist|Consultant)/i)) {
-      currentRole = line.split(/\s*[|@-]\s*/)[0].trim();
-      const companyMatch = line.match(/(?:at|@|-)\s*(.+)/i);
-      if (companyMatch) currentCompany = companyMatch[1].trim();
+  // Common job title keywords
+  const titleKeywords = /^(Senior|Junior|Lead|Principal|Staff|Chief|Head|Director|Manager|Engineer|Developer|Analyst|Specialist|Consultant|Associate|Executive|Architect|Designer|Coordinator|Administrator|Officer|VP|AVP|SVP|CEO|CTO|CFO|COO)/i;
+
+  for (let i = 0; i < Math.min(lines.length, 25); i++) {
+    const line = lines[i];
+
+    // Pattern: "Title at Company" or "Title | Company" or "Title - Company"
+    if (titleKeywords.test(line)) {
+      const parts = line.split(/\s+(?:at|@|[-|])\s+/i);
+      currentRole = parts[0].trim();
+      if (parts[1]) currentCompany = parts[1].trim();
+      break;
+    }
+
+    // Pattern: "Current: Title"
+    const currentMatch = line.match(/(?:current|present|latest)[\s:]+(.+)/i);
+    if (currentMatch) {
+      currentRole = currentMatch[1].trim();
       break;
     }
   }
@@ -266,16 +353,20 @@ function extractCurrentRole(text) {
   return { currentRole, currentCompany };
 }
 
-// Extract education
+// Extract education - improved
 function extractEducation(text) {
   const eduPatterns = [
-    /(Bachelor|Master|PhD|Ph\.D|MBA|B\.S\.|M\.S\.|B\.A\.|M\.A\.|B\.Tech|M\.Tech|B\.E\.|M\.E\.)[^.\n]*/i,
-    /(Computer Science|Engineering|Business|Mathematics|Statistics|Data Science|Information Technology)/i
+    // Degree patterns
+    /((?:Bachelor|Master|Doctor|PhD|Ph\.D|MBA|B\.S\.|M\.S\.|B\.A\.|M\.A\.|B\.Tech|M\.Tech|B\.E\.|M\.E\.|B\.Sc|M\.Sc|BCA|MCA|BBA)[^.\n,]*(?:in\s+[A-Za-z\s]+)?)/i,
+    // Field of study
+    /(?:degree|studied|graduated)[\s\w]*(?:in\s+)?(Computer Science|Engineering|Business|Mathematics|Statistics|Data Science|Information Technology|Economics|Finance|Management)/i,
+    // University names
+    /((?:University|Institute|College)\s+of\s+[A-Za-z\s]+|IIT|IIM|NIT|BITS)/i
   ];
 
   for (const pattern of eduPatterns) {
     const match = text.match(pattern);
-    if (match) return match[0].trim();
+    if (match) return match[1] ? match[1].trim() : match[0].trim();
   }
   return '';
 }
@@ -464,9 +555,10 @@ async function runAnalysis() {
       const text = await file.text();
       const contactInfo = extractContactInfo(text);
       const roleInfo = extractCurrentRole(text);
+      const candidateName = extractCandidateName(text, file.name);
 
       uploadedResumes.push({
-        name: file.name.replace(/\.[^/.]+$/, '').split(/[_-]/).map(capitalize).join(' '),
+        name: candidateName,
         resume: text,
         email: contactInfo.email,
         phone: contactInfo.phone,
@@ -800,9 +892,10 @@ async function saveUploadedResumes() {
       const text = await file.text();
       const contactInfo = extractContactInfo(text);
       const roleInfo = extractCurrentRole(text);
+      const candidateName = extractCandidateName(text, file.name);
 
       await saveResumeToLibrary({
-        name: file.name.replace(/\.[^/.]+$/, '').split(/[_-]/).map(capitalize).join(' '),
+        name: candidateName,
         fileName: file.name,
         content: text,
         resume: text,

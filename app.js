@@ -94,6 +94,71 @@ let currentRankingData = [];
 const MAX_UPLOAD_LIMIT = 20;
 
 // =====================
+// PDF TEXT EXTRACTION
+// =====================
+
+// Initialize PDF.js worker
+if (typeof pdfjsLib !== 'undefined') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
+
+/**
+ * Extract text content from a PDF file
+ * @param {File} file - The PDF file to extract text from
+ * @returns {Promise<string>} - The extracted text content
+ */
+async function extractTextFromPDF(file) {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+    let fullText = '';
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+
+      // Extract text items and join them
+      const pageText = textContent.items
+        .map(item => item.str)
+        .join(' ');
+
+      fullText += pageText + '\n';
+    }
+
+    return fullText.trim();
+  } catch (error) {
+    console.error('Error extracting PDF text:', error);
+    return '';
+  }
+}
+
+/**
+ * Extract text from any supported file type
+ * @param {File} file - The file to extract text from
+ * @returns {Promise<string>} - The extracted text content
+ */
+async function extractTextFromFile(file) {
+  const fileName = file.name.toLowerCase();
+
+  if (fileName.endsWith('.pdf')) {
+    // Use PDF.js for PDF files
+    return await extractTextFromPDF(file);
+  } else if (fileName.endsWith('.txt') || fileName.endsWith('.html')) {
+    // Plain text files
+    return await file.text();
+  } else if (fileName.endsWith('.doc') || fileName.endsWith('.docx')) {
+    // For DOC/DOCX, we can't parse them in browser without additional libraries
+    // Return empty and show warning
+    console.warn('DOC/DOCX files require conversion. Please use PDF or TXT format.');
+    return await file.text(); // This won't work well for binary formats
+  } else {
+    // Try to read as text
+    return await file.text();
+  }
+}
+
+// =====================
 // INDEXEDDB STORAGE
 // =====================
 const DB_NAME = 'SmartScreenerDB';
@@ -552,7 +617,14 @@ async function runAnalysis() {
 
   try {
     for (const file of uploadFiles) {
-      const text = await file.text();
+      // Use PDF extraction for PDF files, text() for others
+      const text = await extractTextFromFile(file);
+
+      if (!text || text.trim().length === 0) {
+        console.warn(`Could not extract text from ${file.name}`);
+        continue;
+      }
+
       const contactInfo = extractContactInfo(text);
       const roleInfo = extractCurrentRole(text);
       const candidateName = extractCandidateName(text, file.name);
@@ -889,7 +961,14 @@ async function saveUploadedResumes() {
 
   try {
     for (const file of uploadFiles) {
-      const text = await file.text();
+      // Use PDF extraction for PDF files, text() for others
+      const text = await extractTextFromFile(file);
+
+      if (!text || text.trim().length === 0) {
+        console.warn(`Could not extract text from ${file.name}`);
+        continue;
+      }
+
       const contactInfo = extractContactInfo(text);
       const roleInfo = extractCurrentRole(text);
       const candidateName = extractCandidateName(text, file.name);

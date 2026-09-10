@@ -56,14 +56,14 @@
       </div>
 
       <div class="sidebar-card">
-        <div class="sidebar-card-label">Hiring Flow</div>
+        <div class="sidebar-card-label">Storage</div>
         <div class="progress-wrap">
           <div class="progress">
-            <div class="progress-bar" id="pipelineBar" style="width: 0%;"></div>
+            <div class="progress-bar" id="storageBar" style="width: 0%;"></div>
           </div>
           <div class="progress-meta">
-            <span>Pipeline health</span>
-            <span class="score-chip high" id="pipelineScore">0%</span>
+            <span id="storageUsed">0 MB</span> / <span>100 MB</span>
+            <span class="score-chip" id="storagePercent">0%</span>
           </div>
         </div>
       </div>
@@ -177,6 +177,7 @@
             <span class="panel-title">Resume Library</span>
           </div>
           <div class="table-actions">
+            <button class="small-button primary" id="scanSelectedBtn">Scan Selected</button>
             <button class="small-button" id="selectAllBtn">Select All</button>
             <button class="small-button danger" id="deleteSelectedBtn">Delete Selected</button>
           </div>

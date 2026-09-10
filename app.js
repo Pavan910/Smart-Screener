@@ -715,7 +715,7 @@ function refreshFileList(files, showLimitWarning = false) {
   uploadStatus.textContent = `${files.length} file${files.length > 1 ? 's' : ''}`;
 }
 
-async function runAnalysis() {
+async function runAnalysis(includeLibraryResumes = false) {
   const jobText = jobDescription.value;
 
   if (!jobText.trim()) {
@@ -724,25 +724,33 @@ async function runAnalysis() {
   }
 
   const uploadFiles = Array.from(resumeFiles.files);
+  const hasUploadedFiles = uploadFiles.length > 0;
+  const hasSelectedLibrary = includeLibraryResumes && selectedResumeIds.size > 0;
 
-  if (uploadFiles.length === 0) {
-    alert('Please upload at least one resume.');
+  // Check if we have any resumes to scan
+  if (!hasUploadedFiles && !hasSelectedLibrary) {
+    alert('Please upload resumes or select resumes from the library to scan.');
     return;
   }
 
-  if (uploadFiles.length > MAX_UPLOAD_LIMIT) {
-    alert(`Too many resumes selected. Maximum ${MAX_UPLOAD_LIMIT} allowed per upload.`);
+  // Check total count against limit
+  const totalCount = uploadFiles.length + (hasSelectedLibrary ? selectedResumeIds.size : 0);
+  if (totalCount > MAX_UPLOAD_LIMIT) {
+    alert(`Too many resumes selected. Maximum ${MAX_UPLOAD_LIMIT} allowed. You have ${totalCount} total (${uploadFiles.length} uploaded + ${selectedResumeIds.size} from library).`);
     return;
   }
 
   scanButton.disabled = true;
   scanButton.innerHTML = '<span>Scanning...</span>';
+  if (scanSelectedBtn) {
+    scanSelectedBtn.disabled = true;
+  }
 
-  const uploadedResumes = [];
+  const allResumes = [];
 
+  // Process uploaded files
   try {
     for (const file of uploadFiles) {
-      // Use PDF extraction for PDF files, text() for others
       const text = await extractTextFromFile(file);
 
       if (!text || text.trim().length === 0) {
@@ -754,7 +762,7 @@ async function runAnalysis() {
       const roleInfo = extractCurrentRole(text);
       const candidateName = extractCandidateName(text, file.name);
 
-      uploadedResumes.push({
+      allResumes.push({
         name: candidateName,
         resume: text,
         email: contactInfo.email,
@@ -764,16 +772,53 @@ async function runAnalysis() {
         experience: extractExperience(text),
         currentRole: roleInfo.currentRole,
         currentCompany: roleInfo.currentCompany,
-        education: extractEducation(text)
+        education: extractEducation(text),
+        source: 'upload'
       });
     }
   } catch (error) {
-    console.warn('Error reading files:', error);
+    console.warn('Error reading uploaded files:', error);
+  }
+
+  // Add selected library resumes
+  if (hasSelectedLibrary) {
+    try {
+      for (const id of selectedResumeIds) {
+        const resume = await getResumeById(id);
+        if (resume) {
+          allResumes.push({
+            name: resume.name || 'Unknown',
+            resume: resume.content || resume.resume || '',
+            email: resume.email || '',
+            phone: resume.phone || '',
+            linkedin: resume.linkedin || '',
+            location: resume.location || '',
+            experience: resume.experience || 0,
+            currentRole: resume.currentRole || '',
+            currentCompany: resume.currentCompany || '',
+            education: resume.education || '',
+            source: 'library'
+          });
+        }
+      }
+    } catch (error) {
+      console.warn('Error reading library resumes:', error);
+    }
+  }
+
+  if (allResumes.length === 0) {
+    alert('Could not extract text from any of the selected resumes.');
+    scanButton.disabled = false;
+    scanButton.innerHTML = '<span>Scan Resumes</span>';
+    if (scanSelectedBtn) {
+      scanSelectedBtn.disabled = false;
+    }
+    return;
   }
 
   const payload = {
     jobDescription: jobText,
-    resumes: uploadedResumes
+    resumes: allResumes
   };
 
   try {
@@ -792,17 +837,17 @@ async function runAnalysis() {
 
     // Merge extracted info with API results
     ranking = ranking.map((r, i) => {
-      const uploaded = uploadedResumes.find(u => u.name === r.name) || uploadedResumes[i] || {};
+      const sourceResume = allResumes.find(u => u.name === r.name) || allResumes[i] || {};
       return {
         ...r,
-        email: r.email || uploaded.email || '',
-        phone: r.phone || uploaded.phone || '',
-        linkedin: r.linkedin || uploaded.linkedin || '',
-        location: r.location || uploaded.location || '',
-        currentRole: r.currentRole || uploaded.currentRole || r.title || '',
-        currentCompany: r.currentCompany || uploaded.currentCompany || '',
-        education: r.education || uploaded.education || '',
-        experience: r.experience || uploaded.experience || 0
+        email: r.email || sourceResume.email || '',
+        phone: r.phone || sourceResume.phone || '',
+        linkedin: r.linkedin || sourceResume.linkedin || '',
+        location: r.location || sourceResume.location || '',
+        currentRole: r.currentRole || sourceResume.currentRole || r.title || '',
+        currentCompany: r.currentCompany || sourceResume.currentCompany || '',
+        education: r.education || sourceResume.education || '',
+        experience: r.experience || sourceResume.experience || 0
       };
     });
 
@@ -818,7 +863,28 @@ async function runAnalysis() {
   } finally {
     scanButton.disabled = false;
     scanButton.innerHTML = '<span>Scan Resumes</span>';
+    if (scanSelectedBtn) {
+      scanSelectedBtn.disabled = false;
+    }
   }
+}
+
+// Scan selected library resumes combined with uploaded files
+async function scanSelectedResumes() {
+  const jobText = jobDescription.value;
+
+  if (!jobText.trim()) {
+    alert('Please enter a job description first.');
+    return;
+  }
+
+  if (selectedResumeIds.size === 0) {
+    alert('Please select resumes from the library to scan.');
+    return;
+  }
+
+  // Run analysis including library resumes
+  await runAnalysis(true);
 }
 
 // Export to CSV
@@ -900,7 +966,7 @@ function downloadFile(content, filename, mimeType) {
 }
 
 // Event Listeners
-scanButton.addEventListener('click', runAnalysis);
+scanButton.addEventListener('click', () => runAnalysis(true));
 
 loadJobButton.addEventListener('click', () => {
   jobDescription.value = sampleJobDescription;
@@ -956,6 +1022,7 @@ const libraryCount = document.getElementById('libraryCount');
 const saveResumesBtn = document.getElementById('saveResumesBtn');
 const selectAllBtn = document.getElementById('selectAllBtn');
 const deleteSelectedBtn = document.getElementById('deleteSelectedBtn');
+const scanSelectedBtn = document.getElementById('scanSelectedBtn');
 const resumeModal = document.getElementById('resumeModal');
 const modalTitle = document.getElementById('modalTitle');
 const resumeContent = document.getElementById('resumeContent');
@@ -963,9 +1030,69 @@ const closeModal = document.getElementById('closeModal');
 
 let selectedResumeIds = new Set();
 
+// Storage constants
+const MAX_STORAGE_MB = 100;
+const storageBar = document.getElementById('storageBar');
+const storageUsed = document.getElementById('storageUsed');
+const storagePercent = document.getElementById('storagePercent');
+
 function updateLibraryCount(count) {
   if (libraryCount) {
     libraryCount.textContent = count;
+  }
+}
+
+function calculateStorageSize(resumes) {
+  // Calculate total size of all resume content in bytes
+  let totalBytes = 0;
+  resumes.forEach(resume => {
+    const content = resume.content || resume.resume || '';
+    // Estimate size: each character is roughly 1 byte for ASCII, 2-3 for Unicode
+    totalBytes += new Blob([content]).size;
+    // Add metadata size estimate
+    totalBytes += JSON.stringify({
+      name: resume.name,
+      email: resume.email,
+      phone: resume.phone,
+      location: resume.location,
+      education: resume.education,
+      currentRole: resume.currentRole
+    }).length;
+  });
+  return totalBytes;
+}
+
+function updateStorageIndicator(resumes) {
+  const totalBytes = calculateStorageSize(resumes);
+  const totalMB = totalBytes / (1024 * 1024);
+  const percentage = Math.min(100, (totalMB / MAX_STORAGE_MB) * 100);
+
+  if (storageUsed) {
+    storageUsed.textContent = totalMB.toFixed(2) + ' MB';
+  }
+
+  if (storageBar) {
+    storageBar.style.width = percentage + '%';
+    // Change color based on usage
+    if (percentage >= 90) {
+      storageBar.className = 'progress-bar storage-critical';
+    } else if (percentage >= 70) {
+      storageBar.className = 'progress-bar storage-warning';
+    } else {
+      storageBar.className = 'progress-bar storage-ok';
+    }
+  }
+
+  if (storagePercent) {
+    storagePercent.textContent = Math.round(percentage) + '%';
+    // Update chip color
+    if (percentage >= 90) {
+      storagePercent.className = 'score-chip critical';
+    } else if (percentage >= 70) {
+      storagePercent.className = 'score-chip warning';
+    } else {
+      storagePercent.className = 'score-chip ok';
+    }
   }
 }
 
@@ -978,10 +1105,12 @@ async function renderLibrary() {
   try {
     const resumes = await getAllResumes();
     updateLibraryCount(resumes.length);
+    updateStorageIndicator(resumes);
     selectedResumeIds.clear();
 
     if (resumes.length === 0) {
       libraryGrid.innerHTML = '<div class="empty-state">No resumes in library. Upload and save resumes to build your library.</div>';
+      updateStorageIndicator([]);
       return;
     }
 
@@ -1183,6 +1312,10 @@ if (selectAllBtn) {
 
 if (deleteSelectedBtn) {
   deleteSelectedBtn.addEventListener('click', deleteSelectedResumes);
+}
+
+if (scanSelectedBtn) {
+  scanSelectedBtn.addEventListener('click', scanSelectedResumes);
 }
 
 if (closeModal) {

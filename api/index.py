@@ -126,9 +126,12 @@ Return ONLY JSON, no explanation."""
 def extract_resume_basic(resume_text):
     """Basic regex extraction fallback when no AI available"""
     text = resume_text.replace('\n', ' ')
+    normalized = text.lower()
 
+    # Email
     email_match = re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
 
+    # Phone
     phone_patterns = [
         r'\+91[\s\-]?\d{4}[\s\-]?\d{3}[\s\-]?\d{3}',
         r'\+91[\s\-]?[6-9]\d{9}',
@@ -142,6 +145,7 @@ def extract_resume_basic(resume_text):
             phone = re.sub(r'[\s\-]', '', match.group(0))
             break
 
+    # Name
     lines = resume_text.split('\n')
     name = ''
     for line in lines[:5]:
@@ -152,17 +156,112 @@ def extract_resume_basic(resume_text):
                 name = line
                 break
 
+    # Experience years
+    exp_years = 0
+    exp_patterns = [
+        r'(\d+)\+?\s*(?:years?|yrs?)[\s\w]*(?:of\s+)?(?:experience|exp)',
+        r'(?:experience|exp)[\s:]*(\d+)\+?\s*(?:years?|yrs?)',
+        r'(?:total|overall)[\s\w]*(\d+)\+?\s*(?:years?|yrs?)'
+    ]
+    for pattern in exp_patterns:
+        match = re.search(pattern, text, re.I)
+        if match:
+            exp_years = int(match.group(1))
+            break
+
+    # Current role - look for job titles
+    current_role = ''
+    role_patterns = [
+        r'((?:Senior|Junior|Lead|Principal|Staff|Chief|Head|Director|Manager|Engineer|Developer|Analyst|Specialist|Consultant|Associate|Executive|Architect|Designer|Coordinator|Administrator|Officer|Financial|Software|Data|Product|Project|Business|Marketing|Sales|HR|Operations|Technical)[^,\n•|]{0,40})',
+    ]
+    for line in lines[:30]:
+        line = line.strip()
+        for pattern in role_patterns:
+            match = re.search(pattern, line, re.I)
+            if match and len(match.group(1)) > 5:
+                current_role = match.group(1).strip()
+                break
+        if current_role:
+            break
+
+    # Education
+    education = ''
+    edu_patterns = [
+        r'(B\.?Com|B\.?Tech|M\.?Tech|B\.?E|M\.?E|B\.?Sc|M\.?Sc|BCA|MCA|BBA|MBA|Bachelor|Master|PhD|Ph\.D)',
+        r'(Bachelor\s+of\s+[A-Za-z\s]+)',
+        r'(Master\s+of\s+[A-Za-z\s]+)'
+    ]
+    for pattern in edu_patterns:
+        match = re.search(pattern, text, re.I)
+        if match:
+            education = match.group(1).strip()
+            break
+
+    # Location - Indian cities
+    location = ''
+    cities = ['Mumbai', 'Delhi', 'Bangalore', 'Bengaluru', 'Hyderabad', 'Chennai', 'Kolkata',
+              'Pune', 'Ahmedabad', 'Jaipur', 'Noida', 'Gurgaon', 'Gurugram', 'Vadodara',
+              'Baroda', 'Surat', 'Lucknow', 'Chandigarh', 'Indore', 'Bhopal', 'Coimbatore',
+              'Kochi', 'Trivandrum', 'Mysore', 'Nagpur', 'Patna', 'Ranchi']
+    for city in cities:
+        if city.lower() in normalized:
+            location = city
+            break
+
+    # Extract skills dynamically from resume text
+    skills = extract_skills_from_text(resume_text)
+
     return {
         "name": name or "Unknown",
         "email": email_match.group(0) if email_match else "",
         "phone": phone,
-        "location": "",
-        "experience_years": 0,
-        "current_role": "",
+        "location": location,
+        "experience_years": exp_years,
+        "current_role": current_role,
         "current_company": "",
-        "education": "",
-        "skills": []
+        "education": education,
+        "skills": skills
     }
+
+def extract_skills_from_text(text):
+    """Extract skills dynamically from resume text without predefined list"""
+    normalized = text.lower()
+    skills = set()
+
+    # Common skill patterns to look for (not a fixed library, just detection patterns)
+    # Technical skills - programming languages, tools, frameworks
+    tech_patterns = [
+        r'\b(python|java|javascript|typescript|react|angular|vue|node\.?js|sql|mysql|postgresql|mongodb|aws|azure|gcp|docker|kubernetes|git|excel|power\s*bi|tableau|pandas|numpy|tensorflow|pytorch|scikit[\s-]?learn|spark|hadoop|airflow|flask|django|spring|html|css|php|ruby|golang|rust|scala|kotlin|swift|c\+\+|c#|\.net|jquery|bootstrap|sass|linux|unix|windows|jira|confluence|slack|figma|sketch|photoshop|illustrator)\b',
+    ]
+
+    # Soft skills and business skills
+    soft_patterns = [
+        r'\b(communication|leadership|teamwork|problem[\s-]?solving|analytical|presentation|negotiation|stakeholder\s+management|client[\s-]?facing|project\s+management|time\s+management|critical\s+thinking|decision[\s-]?making|collaboration|mentoring|coaching|strategic\s+planning|business\s+analysis|data\s+analysis|reporting|documentation)\b',
+    ]
+
+    # Certifications and methodologies
+    cert_patterns = [
+        r'\b(agile|scrum|kanban|devops|ci[\s/]?cd|pmp|six\s+sigma|itil|iso|sap|salesforce|oracle|microsoft\s+certified|aws\s+certified|google\s+certified|lean|waterfall|tdd|bdd)\b',
+    ]
+
+    all_patterns = tech_patterns + soft_patterns + cert_patterns
+
+    for pattern in all_patterns:
+        matches = re.findall(pattern, normalized, re.I)
+        for match in matches:
+            # Clean and capitalize skill name
+            skill = match.strip()
+            if len(skill) > 1:
+                # Proper capitalization
+                if skill.lower() in ['sql', 'aws', 'gcp', 'css', 'html', 'php', 'ci/cd', 'pmp', 'sap']:
+                    skill = skill.upper()
+                elif skill.lower() in ['javascript', 'typescript', 'python', 'java', 'react', 'angular', 'vue', 'docker', 'kubernetes', 'excel', 'tableau', 'jira', 'figma', 'linux', 'windows']:
+                    skill = skill.capitalize()
+                else:
+                    skill = skill.title()
+                skills.add(skill)
+
+    return list(skills)[:15]  # Return top 15 skills
 
 def analyze_match_with_ai(resume_data, job_text):
     """Use AI to match resume skills against job description - dynamic matching"""
@@ -210,11 +309,69 @@ Return ONLY JSON:
         except:
             pass
 
+    # Fallback: basic matching without AI
+    return match_skills_basic(resume_data, job_text)
+
+def match_skills_basic(resume_data, job_text):
+    """Basic skill matching when no AI available - compares resume skills to job description"""
+    job_normalized = job_text.lower()
+    resume_skills = [s.lower() for s in resume_data.get('skills', [])]
+
+    # Extract skills/keywords from job description
+    job_skills = extract_skills_from_text(job_text)
+
+    # Find matches
+    matched = []
+    missing = []
+
+    for skill in job_skills:
+        skill_lower = skill.lower()
+        # Check if skill or similar term exists in resume
+        found = False
+        for rs in resume_skills:
+            if skill_lower in rs or rs in skill_lower:
+                found = True
+                break
+        if found:
+            matched.append(skill)
+        else:
+            missing.append(skill)
+
+    # Calculate score
+    if len(job_skills) > 0:
+        skill_score = int((len(matched) / len(job_skills)) * 60)
+    else:
+        skill_score = 30
+
+    # Experience bonus
+    exp = resume_data.get('experience_years', 0)
+    exp_score = min(20, exp * 3) if exp > 0 else 0
+
+    # Role relevance bonus
+    role_score = 0
+    current_role = resume_data.get('current_role', '').lower()
+    if current_role:
+        role_keywords = ['analyst', 'developer', 'engineer', 'manager', 'lead', 'senior', 'consultant', 'specialist']
+        for kw in role_keywords:
+            if kw in job_normalized and kw in current_role:
+                role_score = 10
+                break
+
+    total_score = min(95, max(35, skill_score + exp_score + role_score))
+
+    # Recommendation
+    if total_score >= 75:
+        recommendation = "Shortlist"
+    elif total_score >= 50:
+        recommendation = "Review"
+    else:
+        recommendation = "Pool"
+
     return {
-        "score": 50,
-        "matched_skills": resume_data.get('skills', [])[:5],
-        "missing_skills": [],
-        "recommendation": "Review"
+        "score": total_score,
+        "matched_skills": matched[:10],
+        "missing_skills": missing[:10],
+        "recommendation": recommendation
     }
 
 def analyze_resumes(job_text, candidates):

@@ -281,42 +281,53 @@ function capitalize(value) {
 // Extract candidate name from resume text
 function extractCandidateName(text, fileName) {
   // Clean and normalize text - PDF extraction often has weird spacing
-  const cleanText = text.replace(/\s+/g, ' ').trim();
   const lines = text.split(/\n/).map(l => l.replace(/\s+/g, ' ').trim()).filter(l => l.length > 0);
 
-  // Try to find name in first few lines (usually at the top of resume)
-  for (let i = 0; i < Math.min(lines.length, 8); i++) {
+  // Words that should not be in a name
+  const skipWords = ['resume', 'cv', 'curriculum', 'vitae', 'updated', 'profile', 'contact', 'summary', 'objective', 'experience', 'education', 'skills', 'about', 'new', 'final', 'latest'];
+
+  // Try to find name in first lines (usually at the top of resume)
+  for (let i = 0; i < Math.min(lines.length, 15); i++) {
     const line = lines[i];
 
     // Skip lines that look like headers, emails, phones, or URLs
-    if (line.match(/^(resume|curriculum|cv|profile|summary|objective|contact|address|phone|email|linkedin|professional)/i)) continue;
+    if (line.match(/^(resume|curriculum|cv|profile|summary|objective|contact|address|phone|email|linkedin|professional|experience|education|skills)/i)) continue;
     if (line.match(/@|http|www\.|\.com|\.org|\.net|\.in\//i)) continue;
     if (line.match(/^\+?\d[\d\s\-().]{6,}/)) continue; // Phone numbers
-    if (line.length > 40) continue; // Too long to be just a name
+    if (line.length > 50) continue; // Too long to be just a name
     if (line.length < 3) continue; // Too short
 
     // Clean the line - remove special chars at start/end
     const cleanLine = line.replace(/^[\s|•\-:]+|[\s|•\-:]+$/g, '').trim();
 
-    // Check if it looks like a name (2-4 words, mostly letters)
+    // Filter out non-name words
     const words = cleanLine.split(/\s+/).filter(w => w.length > 0);
-    if (words.length >= 2 && words.length <= 4) {
-      // Check if words look like name parts (start with capital, mostly letters)
-      const looksLikeName = words.every(w => /^[A-Z][a-zA-Z]*$/.test(w));
+    const nameWords = words.filter(w => !skipWords.includes(w.toLowerCase()));
+
+    if (nameWords.length >= 2 && nameWords.length <= 4) {
+      // Check if words look like name parts (start with capital, only letters)
+      const looksLikeName = nameWords.every(w => /^[A-Z][a-zA-Z]*$/.test(w));
       if (looksLikeName) {
-        return cleanLine;
+        return nameWords.join(' ');
       }
     }
 
     // Also try: "Name: John Doe" format
-    const labeledName = line.match(/^(?:name|candidate|applicant):\s*(.+)/i);
+    const labeledName = line.match(/^(?:name|candidate|applicant)\s*[:\-]\s*(.+)/i);
     if (labeledName) {
       return labeledName[1].trim();
     }
   }
 
-  // Fallback to cleaned filename
-  return fileName.replace(/\.[^/.]+$/, '').split(/[_-]/).map(capitalize).join(' ');
+  // Fallback to cleaned filename - but remove common words
+  const fileNameClean = fileName
+    .replace(/\.[^/.]+$/, '')  // Remove extension
+    .split(/[_\-\s]+/)
+    .filter(w => !skipWords.includes(w.toLowerCase()))
+    .map(capitalize)
+    .join(' ');
+
+  return fileNameClean || 'Unknown';
 }
 
 // Extract contact info from resume text

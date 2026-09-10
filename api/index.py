@@ -145,16 +145,44 @@ def extract_resume_basic(resume_text):
             phone = re.sub(r'[\s\-]', '', match.group(0))
             break
 
-    # Name
+    # Name - improved extraction
     lines = resume_text.split('\n')
     name = ''
-    for line in lines[:5]:
+
+    # Skip words that are not names
+    skip_words = ['resume', 'cv', 'curriculum', 'vitae', 'updated', 'profile', 'contact', 'summary', 'objective', 'experience', 'education', 'skills', 'about']
+
+    for line in lines[:15]:  # Check more lines
         line = line.strip()
-        if 2 < len(line) < 40 and not re.search(r'@|http|\+\d|^\d', line):
-            words = line.split()
-            if 2 <= len(words) <= 4 and all(w[0].isupper() for w in words if w):
-                name = line
+        if not line or len(line) < 3 or len(line) > 50:
+            continue
+
+        # Skip lines with email, URL, phone
+        if re.search(r'@|http|www\.|\.com|\.org|\.net|\+\d|^\d{5,}', line, re.I):
+            continue
+
+        # Skip common resume headers
+        if re.match(r'^(resume|cv|curriculum|profile|contact|summary|objective|experience|education|skills|about|work|employment|professional)', line, re.I):
+            continue
+
+        # Clean the line
+        clean_line = re.sub(r'^[\s|•\-:]+|[\s|•\-:]+$', '', line).strip()
+
+        # Remove words like "Resume", "CV", "Updated" from potential name
+        words = clean_line.split()
+        filtered_words = [w for w in words if w.lower() not in skip_words]
+
+        if len(filtered_words) >= 2 and len(filtered_words) <= 4:
+            # Check if words look like a name (capitalized)
+            if all(w[0].isupper() and w.isalpha() for w in filtered_words if w):
+                name = ' '.join(filtered_words)
                 break
+
+        # Also check for "Name: John Doe" format
+        name_match = re.match(r'^(?:name|candidate|applicant)\s*[:\-]\s*(.+)', line, re.I)
+        if name_match:
+            name = name_match.group(1).strip()
+            break
 
     # Experience years
     exp_years = 0

@@ -386,29 +386,56 @@ function extractContactInfo(text) {
 // Extract location from resume text
 function extractLocation(text) {
   const normalizedText = text.replace(/\s+/g, ' ');
+  const textLower = normalizedText.toLowerCase();
 
-  const locationPatterns = [
-    // Labeled locations
-    /(?:Location|Address|City|Based in|residing at|located at):\s*([A-Za-z\s,]+(?:India|USA|UK|Canada|Australia)?)/i,
-    // Indian cities with state/country
-    /((?:Mumbai|Delhi|Bangalore|Bengaluru|Hyderabad|Chennai|Kolkata|Pune|Ahmedabad|Jaipur|Noida|Gurgaon|Gurugram|Vadodara|Baroda|Surat|Lucknow|Chandigarh|Indore|Bhopal|Coimbatore|Kochi|Trivandrum|Mysore|Nagpur|Patna|Ranchi|Bhubaneswar)(?:,?\s*(?:India|Maharashtra|Karnataka|Gujarat|Tamil Nadu|Telangana|Kerala|Rajasthan|UP|MP|WB))?)/i,
-    // US cities with state
-    /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*,\s*(?:CA|NY|TX|FL|WA|IL|PA|OH|GA|NC|MI|NJ|VA|AZ|MA|TN|IN|MO|MD|WI|CO|MN|SC|AL|LA|KY|OR|OK|CT|UT|IA|NV|AR|MS|KS|NM|NE|WV|ID|HI|NH|ME|MT|RI|DE|SD|ND|AK|VT|WY|DC))/,
-    // Remote/Hybrid
-    /(Remote|Hybrid|On-site|Work from home)/i
+  // Extended list of Indian cities
+  const indianCities = [
+    'Mumbai', 'Delhi', 'New Delhi', 'Bangalore', 'Bengaluru', 'Hyderabad', 'Chennai',
+    'Kolkata', 'Pune', 'Ahmedabad', 'Jaipur', 'Noida', 'Gurgaon', 'Gurugram',
+    'Vadodara', 'Baroda', 'Surat', 'Lucknow', 'Chandigarh', 'Indore', 'Bhopal',
+    'Coimbatore', 'Kochi', 'Cochin', 'Trivandrum', 'Thiruvananthapuram', 'Mysore',
+    'Mysuru', 'Nagpur', 'Patna', 'Ranchi', 'Bhubaneswar', 'Visakhapatnam', 'Vizag',
+    'Thane', 'Navi Mumbai', 'Faridabad', 'Ghaziabad', 'Rajkot', 'Nashik', 'Aurangabad',
+    'Ludhiana', 'Amritsar', 'Agra', 'Varanasi', 'Kanpur', 'Dehradun', 'Raipur',
+    'Jodhpur', 'Udaipur', 'Guwahati', 'Mangalore', 'Mangaluru', 'Hubli', 'Belgaum',
+    'Salem', 'Madurai', 'Trichy', 'Tiruchirappalli', 'Vijayawada', 'Warangal'
   ];
 
-  for (const pattern of locationPatterns) {
+  // First check for labeled locations
+  const labeledPatterns = [
+    /(?:Location|Address|City|Based in|residing at|located at|current location)\s*[:\-]\s*([A-Za-z\s,]+)/i,
+    /(?:Location|Address)\s*[:\-]?\s*([A-Za-z]+(?:,?\s*[A-Za-z]+)?)/i
+  ];
+
+  for (const pattern of labeledPatterns) {
     const match = normalizedText.match(pattern);
-    if (match) {
-      const location = (match[1] || match[0]).trim();
-      // Don't return if it looks like a department name
-      if (location.match(/^(Finance|IT|HR|Marketing|Sales|Legal|Operations)$/i)) {
-        continue;
+    if (match && match[1]) {
+      const loc = match[1].trim().split(',')[0].trim();
+      if (loc.length > 2 && loc.length < 30) {
+        return loc;
       }
-      return location;
     }
   }
+
+  // Check for Indian cities
+  for (const city of indianCities) {
+    if (textLower.includes(city.toLowerCase())) {
+      return city;
+    }
+  }
+
+  // Check for US cities with state codes
+  const usPattern = /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),?\s*(CA|NY|TX|FL|WA|IL|PA|OH|GA|NC|MI|NJ|VA|AZ|MA|TN|IN|MO|MD|WI|CO|MN|SC|AL|LA|KY|OR|OK|CT|UT|IA|NV|AR|MS|KS|NM|NE|WV|ID|HI|NH|ME|MT|RI|DE|SD|ND|AK|VT|WY|DC)/;
+  const usMatch = normalizedText.match(usPattern);
+  if (usMatch) {
+    return `${usMatch[1]}, ${usMatch[2]}`;
+  }
+
+  // Check for Remote/Hybrid
+  if (textLower.includes('remote') || textLower.includes('work from home')) {
+    return 'Remote';
+  }
+
   return '';
 }
 
@@ -469,62 +496,97 @@ function extractCurrentRole(text) {
   let currentRole = '';
   let currentCompany = '';
 
-  // Common job title patterns
+  // Job title keywords that should appear at the START of a title
+  const titleStarters = '(?:Senior|Junior|Lead|Principal|Staff|Chief|Head|Director|Manager|Associate|Assistant|Vice|Deputy|Executive|Trainee|Intern)';
+
+  // Core job roles
+  const coreRoles = '(?:Engineer|Developer|Analyst|Specialist|Consultant|Architect|Designer|Coordinator|Administrator|Officer|Accountant|Advisor|Representative|Recruiter|Executive|Programmer|Scientist|Researcher)';
+
+  // Domain prefixes
+  const domains = '(?:Software|Data|Product|Project|Business|Marketing|Sales|HR|Human Resources|Operations|Quality|Technical|IT|Web|Mobile|Full[\\s-]?Stack|Front[\\s-]?End|Back[\\s-]?End|Financial|Finance|Machine Learning|ML|AI|DevOps|Cloud|Security|Network|Database|System|UX|UI|QA|Test|Support|Customer|Client)';
+
+  // Specific job title patterns - must be complete titles, not part of sentences
   const titlePatterns = [
-    // "Financial Analyst – Client Communication Representative" format
-    /^((?:Senior|Junior|Lead|Principal|Staff|Chief|Head|Director|Manager|Engineer|Developer|Analyst|Specialist|Consultant|Associate|Executive|Architect|Designer|Coordinator|Administrator|Officer|VP|AVP|SVP|CEO|CTO|CFO|COO|Financial|Software|Data|Product|Project|Business|Marketing|Sales|HR|Human|Operations|Quality|Technical|IT|Web|Mobile|Full[\s-]?Stack|Front[\s-]?End|Back[\s-]?End)[^•\n]{0,60})/i,
+    // "Senior Software Engineer" or "Data Analyst"
+    new RegExp(`^(${titleStarters}\\s+)?${domains}\\s+${coreRoles}$`, 'i'),
+    // "Software Engineer - Senior" or "Engineer, Software"
+    new RegExp(`^${domains}\\s+${coreRoles}(?:\\s*[-–,]\\s*${titleStarters})?$`, 'i'),
+    // "ML Engineer" or "AI Specialist"
+    new RegExp(`^(${titleStarters}\\s+)?(?:ML|AI|SDE|SWE|MTS)(?:\\s+${coreRoles})?$`, 'i'),
+    // Role at Company format: "Software Engineer at Google"
+    new RegExp(`^(${titleStarters}\\s+)?${domains}?\\s*${coreRoles}\\s+(?:at|@)\\s+[A-Z]`, 'i'),
+    // Simple role titles
+    /^(Software Engineer|Data Analyst|Product Manager|Project Manager|Business Analyst|HR Manager|Financial Analyst|Data Scientist|ML Engineer|DevOps Engineer|Full Stack Developer|Frontend Developer|Backend Developer|QA Engineer|Test Engineer|System Administrator|Network Engineer|Cloud Engineer|Security Analyst|UX Designer|UI Designer|Technical Lead|Team Lead|Tech Lead|Engineering Manager|Scrum Master|Agile Coach)$/i
   ];
 
-  // Look for work experience section
+  // Look for work experience section first
   let inWorkSection = false;
-  for (let i = 0; i < Math.min(lines.length, 50); i++) {
+  let foundInWorkSection = false;
+
+  for (let i = 0; i < Math.min(lines.length, 60); i++) {
     const line = lines[i];
 
-    // Check if we're entering work experience section
-    if (line.match(/^(work\s+experience|experience|employment|professional\s+experience)/i)) {
+    // Check if entering work experience section
+    if (line.match(/^(work\s*experience|professional\s*experience|employment\s*history|career\s*history|experience)/i)) {
       inWorkSection = true;
       continue;
     }
 
-    // In work section, look for company and role
-    if (inWorkSection) {
-      // Pattern: "Company Name | Date - Date" or "Company Name (Date)"
-      const companyMatch = line.match(/^([A-Z][^|•\n]{3,40})\s*[\|]\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d)/i);
-      if (companyMatch && !currentCompany) {
-        currentCompany = companyMatch[1].trim();
+    // Skip section headers
+    if (line.match(/^(education|skills|certifications|projects|achievements|summary|objective|contact|references)/i)) {
+      inWorkSection = false;
+      continue;
+    }
+
+    if (inWorkSection && !foundInWorkSection) {
+      // Look for role with date pattern: "Software Engineer | Jan 2020 - Present"
+      const roleWithDate = line.match(/^([A-Za-z\s\-]+(?:Engineer|Developer|Analyst|Manager|Specialist|Consultant|Designer|Lead|Architect|Officer|Coordinator|Administrator|Executive|Scientist|Recruiter|Representative|Accountant))\s*[|–\-]\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|\d{4}|Present)/i);
+      if (roleWithDate) {
+        currentRole = roleWithDate[1].trim();
+        foundInWorkSection = true;
         continue;
       }
 
-      // Look for job title after company
-      for (const pattern of titlePatterns) {
-        const match = line.match(pattern);
-        if (match && !currentRole) {
-          // Clean the role - take only the title part, not bullet points
-          currentRole = match[1].replace(/[•\-]\s*$/, '').trim();
-          // Limit length
-          if (currentRole.length > 50) {
-            currentRole = currentRole.substring(0, 50).replace(/\s+\S*$/, '');
-          }
-          break;
-        }
+      // Check for company name with date
+      const companyPattern = line.match(/^([A-Z][A-Za-z\s&.,]+(?:Ltd|Inc|Corp|LLC|Pvt|Private|Limited|Company|Technologies|Solutions|Services|Consulting)?)\s*[|–\-]\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|\d{4})/i);
+      if (companyPattern && !currentCompany) {
+        currentCompany = companyPattern[1].trim();
       }
 
-      // Stop after finding both
-      if (currentRole && currentCompany) break;
+      // Check next line for role if we found company
+      if (currentCompany && !currentRole && lines[i + 1]) {
+        const nextLine = lines[i + 1].trim();
+        for (const pattern of titlePatterns) {
+          if (pattern.test(nextLine)) {
+            currentRole = nextLine;
+            foundInWorkSection = true;
+            break;
+          }
+        }
+      }
     }
 
-    // Also check outside work section for title keywords
-    if (!currentRole) {
+    // Also look for standalone job titles (often near the top)
+    if (!currentRole && i < 20) {
       for (const pattern of titlePatterns) {
-        const match = line.match(pattern);
-        if (match && line.length < 80) {
-          currentRole = match[1].replace(/[•\-]\s*$/, '').trim();
-          if (currentRole.length > 50) {
-            currentRole = currentRole.substring(0, 50).replace(/\s+\S*$/, '');
-          }
+        if (pattern.test(line) && line.length < 60) {
+          currentRole = line;
           break;
         }
       }
+    }
+  }
+
+  // Clean up the role
+  if (currentRole) {
+    currentRole = currentRole
+      .replace(/[•\-–|]\s*$/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    // Limit length and ensure it looks like a title
+    if (currentRole.length > 50) {
+      currentRole = currentRole.substring(0, 50).replace(/\s+\S*$/, '');
     }
   }
 

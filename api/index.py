@@ -80,36 +80,39 @@ def call_ai_api(messages, max_tokens=800):
         return None
 
 def extract_resume_with_ai(resume_text, job_description=""):
-    """Use AI to extract structured data from resume - no hardcoded skills"""
+    """Use AI to extract structured data from resume with high accuracy"""
 
-    jd_context = f"\nJOB REQUIREMENTS (for context):\n{job_description[:500]}\n" if job_description else ""
+    jd_context = f"\nJOB DESCRIPTION (match skills against this):\n{job_description[:800]}\n" if job_description else ""
 
-    prompt = f"""Extract information from this resume. Return ONLY valid JSON.
+    prompt = f"""You are an expert HR resume parser. Extract information from this resume with high accuracy.
 
-Extract ALL skills mentioned - technical skills, soft skills, tools, methodologies, certifications, languages, domain knowledge. Do not limit to any predefined list.
+IMPORTANT RULES:
+1. NAME: Extract the candidate's full name (usually at the top). Do NOT include words like "Resume", "CV", "Updated" in the name.
+2. LOCATION: Extract the city/location where the candidate is based. Look for city names in contact section or address.
+3. EXPERIENCE: Calculate total years of professional experience from work history dates. If explicit "X years experience" is mentioned, use that.
+4. CURRENT ROLE: Extract the EXACT job title from the MOST RECENT job position. This should be a proper job title like "Software Engineer", "HR Manager", "Data Analyst" - NOT descriptive text.
+5. SKILLS: Extract ALL skills mentioned in the resume - programming languages, tools, frameworks, soft skills, domain expertise, certifications. Read the entire resume carefully.
 {jd_context}
 RESUME TEXT:
-{resume_text[:3500]}
+{resume_text[:4000]}
 
-Return this JSON format:
+Return ONLY this JSON (no explanation, no markdown):
 {{
-  "name": "full name",
-  "email": "email address",
-  "phone": "phone with country code",
-  "location": "city, country",
-  "experience_years": number,
-  "current_role": "most recent job title",
-  "current_company": "most recent company",
-  "education": "highest degree",
-  "skills": ["all skills found in resume - technical, soft skills, tools, domain expertise"]
-}}
-
-Return ONLY JSON, no explanation."""
+  "name": "candidate full name only",
+  "email": "email@example.com",
+  "phone": "+91XXXXXXXXXX or similar",
+  "location": "City name",
+  "experience_years": number (integer),
+  "current_role": "exact job title from most recent position",
+  "current_company": "most recent company name",
+  "education": "highest degree (e.g., B.Tech, MBA, etc.)",
+  "skills": ["skill1", "skill2", "skill3", ...]
+}}"""
 
     response = call_ai_api([
-        {"role": "system", "content": "Extract resume data into JSON. Find ALL skills - technical, soft skills, tools, certifications, domain knowledge. No predefined skill list."},
+        {"role": "system", "content": "You are a precise resume parser. Extract data exactly as it appears in the resume. For current_role, extract the actual job title, not descriptive text. For skills, list ALL skills found including technical, soft skills, tools, and certifications."},
         {"role": "user", "content": prompt}
-    ])
+    ], max_tokens=1000)
 
     if response:
         try:
@@ -124,35 +127,35 @@ Return ONLY JSON, no explanation."""
     return extract_resume_basic(resume_text)
 
 def extract_resume_basic(resume_text):
-    """Basic regex extraction fallback when no AI available"""
+    """Smart regex extraction fallback when no AI available - no hardcoded lists"""
     text = resume_text.replace('\n', ' ')
     normalized = text.lower()
+    lines = resume_text.split('\n')
 
-    # Email
+    # Email - standard pattern
     email_match = re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
 
-    # Phone
+    # Phone - international patterns
     phone_patterns = [
-        r'\+91[\s\-]?\d{4}[\s\-]?\d{3}[\s\-]?\d{3}',
-        r'\+91[\s\-]?[6-9]\d{9}',
-        r'[6-9]\d{9}',
-        r'\+1[\s\-]?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{4}'
+        r'\+\d{1,3}[\s\-]?\d{4,5}[\s\-]?\d{3,4}[\s\-]?\d{3,4}',  # International
+        r'\+\d{1,3}[\s\-]?\d{10}',  # +XX XXXXXXXXXX
+        r'[6-9]\d{9}',  # Indian mobile
+        r'\(\d{3}\)[\s\-]?\d{3}[\s\-]?\d{4}'  # US format
     ]
     phone = ''
     for pattern in phone_patterns:
         match = re.search(pattern, text)
         if match:
-            phone = re.sub(r'[\s\-]', '', match.group(0))
+            phone = re.sub(r'[\s\-\(\)]', '', match.group(0))
             break
 
-    # Name - improved extraction
-    lines = resume_text.split('\n')
+    # Name extraction - smart approach
     name = ''
+    skip_words = ['resume', 'cv', 'curriculum', 'vitae', 'updated', 'profile', 'contact',
+                  'summary', 'objective', 'experience', 'education', 'skills', 'about',
+                  'new', 'final', 'latest', 'version', 'draft']
 
-    # Skip words that are not names
-    skip_words = ['resume', 'cv', 'curriculum', 'vitae', 'updated', 'profile', 'contact', 'summary', 'objective', 'experience', 'education', 'skills', 'about']
-
-    for line in lines[:15]:  # Check more lines
+    for line in lines[:15]:
         line = line.strip()
         if not line or len(line) < 3 or len(line) > 50:
             continue
@@ -161,30 +164,28 @@ def extract_resume_basic(resume_text):
         if re.search(r'@|http|www\.|\.com|\.org|\.net|\+\d|^\d{5,}', line, re.I):
             continue
 
-        # Skip common resume headers
-        if re.match(r'^(resume|cv|curriculum|profile|contact|summary|objective|experience|education|skills|about|work|employment|professional)', line, re.I):
+        # Skip section headers
+        if re.match(r'^(resume|cv|curriculum|profile|contact|summary|objective|experience|education|skills|about|work|employment|professional|technical)', line, re.I):
             continue
 
-        # Clean the line
+        # Clean and filter
         clean_line = re.sub(r'^[\s|•\-:]+|[\s|•\-:]+$', '', line).strip()
-
-        # Remove words like "Resume", "CV", "Updated" from potential name
         words = clean_line.split()
-        filtered_words = [w for w in words if w.lower() not in skip_words]
+        filtered_words = [w for w in words if w.lower() not in skip_words and len(w) > 1]
 
-        if len(filtered_words) >= 2 and len(filtered_words) <= 4:
-            # Check if words look like a name (capitalized)
-            if all(w[0].isupper() and w.isalpha() for w in filtered_words if w):
+        # Check if looks like a name (2-4 capitalized words)
+        if 2 <= len(filtered_words) <= 4:
+            if all(w[0].isupper() and w.replace('.', '').isalpha() for w in filtered_words if w):
                 name = ' '.join(filtered_words)
                 break
 
-        # Also check for "Name: John Doe" format
+        # Check "Name: John Doe" format
         name_match = re.match(r'^(?:name|candidate|applicant)\s*[:\-]\s*(.+)', line, re.I)
         if name_match:
             name = name_match.group(1).strip()
             break
 
-    # Experience years
+    # Experience - calculate from dates if not explicitly mentioned
     exp_years = 0
     exp_patterns = [
         r'(\d+)\+?\s*(?:years?|yrs?)[\s\w]*(?:of\s+)?(?:experience|exp)',
@@ -197,27 +198,44 @@ def extract_resume_basic(resume_text):
             exp_years = int(match.group(1))
             break
 
-    # Current role - look for job titles
+    # If not found, calculate from work history
+    if exp_years == 0:
+        current_year = 2024
+        years_found = re.findall(r'\b(19\d{2}|20[0-2]\d)\b', text)
+        years_found = [int(y) for y in years_found if 1990 <= int(y) <= current_year]
+        if years_found:
+            exp_years = current_year - min(years_found)
+            if exp_years > 40:  # Sanity check
+                exp_years = 0
+
+    # Current role - look for job title patterns near "Present" or recent dates
     current_role = ''
-    role_patterns = [
-        r'((?:Senior|Junior|Lead|Principal|Staff|Chief|Head|Director|Manager|Engineer|Developer|Analyst|Specialist|Consultant|Associate|Executive|Architect|Designer|Coordinator|Administrator|Officer|Financial|Software|Data|Product|Project|Business|Marketing|Sales|HR|Operations|Technical)[^,\n•|]{0,40})',
-    ]
-    for line in lines[:30]:
-        line = line.strip()
-        for pattern in role_patterns:
-            match = re.search(pattern, line, re.I)
-            if match and len(match.group(1)) > 5:
-                current_role = match.group(1).strip()
-                break
+    role_keywords = ['engineer', 'developer', 'analyst', 'manager', 'lead', 'specialist',
+                     'consultant', 'designer', 'architect', 'coordinator', 'executive',
+                     'officer', 'director', 'head', 'associate', 'scientist', 'recruiter',
+                     'administrator', 'representative', 'accountant']
+
+    for i, line in enumerate(lines[:40]):
+        line_lower = line.lower().strip()
+        # Check if line contains a role keyword and is near dates or "present"
+        for keyword in role_keywords:
+            if keyword in line_lower and len(line.strip()) < 80:
+                # Check if this looks like a job title (not a bullet point or sentence)
+                if not line.strip().startswith('•') and not line.strip().startswith('-'):
+                    # Extract potential title
+                    title_match = re.match(r'^([A-Z][A-Za-z\s\-]+(?:Engineer|Developer|Analyst|Manager|Lead|Specialist|Consultant|Designer|Architect|Coordinator|Executive|Officer|Director|Associate|Scientist|Recruiter|Administrator|Representative|Accountant))', line.strip(), re.I)
+                    if title_match:
+                        current_role = title_match.group(1).strip()
+                        break
         if current_role:
             break
 
-    # Education
+    # Education - find degree patterns
     education = ''
     edu_patterns = [
-        r'(B\.?Com|B\.?Tech|M\.?Tech|B\.?E|M\.?E|B\.?Sc|M\.?Sc|BCA|MCA|BBA|MBA|Bachelor|Master|PhD|Ph\.D)',
-        r'(Bachelor\s+of\s+[A-Za-z\s]+)',
-        r'(Master\s+of\s+[A-Za-z\s]+)'
+        r'(B\.?Tech|M\.?Tech|B\.?E\.?|M\.?E\.?|B\.?Com|M\.?Com|B\.?Sc|M\.?Sc|BCA|MCA|BBA|MBA|B\.?A\.?|M\.?A\.?|PhD|Ph\.?D\.?|Bachelor|Master)',
+        r'(Bachelor\s+of\s+[A-Za-z\s]{3,30})',
+        r'(Master\s+of\s+[A-Za-z\s]{3,30})'
     ]
     for pattern in edu_patterns:
         match = re.search(pattern, text, re.I)
@@ -225,18 +243,22 @@ def extract_resume_basic(resume_text):
             education = match.group(1).strip()
             break
 
-    # Location - Indian cities
+    # Location - look for labeled location or common patterns
     location = ''
-    cities = ['Mumbai', 'Delhi', 'Bangalore', 'Bengaluru', 'Hyderabad', 'Chennai', 'Kolkata',
-              'Pune', 'Ahmedabad', 'Jaipur', 'Noida', 'Gurgaon', 'Gurugram', 'Vadodara',
-              'Baroda', 'Surat', 'Lucknow', 'Chandigarh', 'Indore', 'Bhopal', 'Coimbatore',
-              'Kochi', 'Trivandrum', 'Mysore', 'Nagpur', 'Patna', 'Ranchi']
-    for city in cities:
-        if city.lower() in normalized:
-            location = city
-            break
+    loc_patterns = [
+        r'(?:Location|Address|City|Based in|residing)\s*[:\-]\s*([A-Za-z][A-Za-z\s,]{2,30})',
+        r'(?:^|\n)\s*([A-Z][a-z]+(?:,\s*[A-Z][a-z]+)?)\s*(?:\n|$)'  # City on its own line
+    ]
+    for pattern in loc_patterns:
+        match = re.search(pattern, resume_text, re.I)
+        if match:
+            loc = match.group(1).strip().split('\n')[0].split(',')[0].strip()
+            # Validate it looks like a city (not a section header)
+            if 2 < len(loc) < 25 and not re.match(r'^(Summary|Experience|Education|Skills|Projects|Contact|Profile)', loc, re.I):
+                location = loc
+                break
 
-    # Extract skills dynamically from resume text
+    # Extract skills dynamically
     skills = extract_skills_from_text(resume_text)
 
     return {
@@ -252,80 +274,119 @@ def extract_resume_basic(resume_text):
     }
 
 def extract_skills_from_text(text):
-    """Extract skills dynamically from resume text without predefined list"""
-    normalized = text.lower()
+    """Extract skills dynamically from resume text using intelligent patterns"""
+    text_lower = text.lower()
     skills = set()
 
-    # Common skill patterns to look for (not a fixed library, just detection patterns)
-    # Technical skills - programming languages, tools, frameworks
-    tech_patterns = [
-        r'\b(python|java|javascript|typescript|react|angular|vue|node\.?js|sql|mysql|postgresql|mongodb|aws|azure|gcp|docker|kubernetes|git|excel|power\s*bi|tableau|pandas|numpy|tensorflow|pytorch|scikit[\s-]?learn|spark|hadoop|airflow|flask|django|spring|html|css|php|ruby|golang|rust|scala|kotlin|swift|c\+\+|c#|\.net|jquery|bootstrap|sass|linux|unix|windows|jira|confluence|slack|figma|sketch|photoshop|illustrator)\b',
+    # Look for explicit skills section
+    skills_section = ""
+    skills_match = re.search(r'(?:skills|technical\s+skills|core\s+competencies|expertise|technologies)[:\s]*\n?([\s\S]{50,800}?)(?:\n\s*\n|\n[A-Z]|$)', text, re.I)
+    if skills_match:
+        skills_section = skills_match.group(1)
+
+    # Extract from skills section if found
+    if skills_section:
+        # Split by common delimiters and extract
+        potential_skills = re.split(r'[,;•|\n\-]+', skills_section)
+        for skill in potential_skills:
+            skill = skill.strip()
+            # Valid skill: 2-40 chars, not just numbers, not a sentence
+            if 2 <= len(skill) <= 40 and not skill.isdigit():
+                # Skip if looks like a sentence (too many words)
+                if len(skill.split()) <= 4:
+                    skills.add(format_skill(skill))
+
+    # Also look for common skill patterns in entire text
+    # Technical terms often follow patterns like "proficient in X", "experience with X", "knowledge of X"
+    skill_context_patterns = [
+        r'(?:proficient|experienced|skilled|expertise|knowledge|familiar)\s+(?:in|with)\s+([A-Za-z0-9\s\+\#\.]{2,30})',
+        r'(?:worked|working)\s+(?:on|with)\s+([A-Za-z0-9\s\+\#\.]{2,30})',
+        r'(?:using|used)\s+([A-Za-z0-9\s\+\#\.]{2,30})',
     ]
 
-    # Soft skills and business skills
-    soft_patterns = [
-        r'\b(communication|leadership|teamwork|problem[\s-]?solving|analytical|presentation|negotiation|stakeholder\s+management|client[\s-]?facing|project\s+management|time\s+management|critical\s+thinking|decision[\s-]?making|collaboration|mentoring|coaching|strategic\s+planning|business\s+analysis|data\s+analysis|reporting|documentation)\b',
-    ]
-
-    # Certifications and methodologies
-    cert_patterns = [
-        r'\b(agile|scrum|kanban|devops|ci[\s/]?cd|pmp|six\s+sigma|itil|iso|sap|salesforce|oracle|microsoft\s+certified|aws\s+certified|google\s+certified|lean|waterfall|tdd|bdd)\b',
-    ]
-
-    all_patterns = tech_patterns + soft_patterns + cert_patterns
-
-    for pattern in all_patterns:
-        matches = re.findall(pattern, normalized, re.I)
+    for pattern in skill_context_patterns:
+        matches = re.findall(pattern, text, re.I)
         for match in matches:
-            # Clean and capitalize skill name
             skill = match.strip()
-            if len(skill) > 1:
-                # Proper capitalization
-                if skill.lower() in ['sql', 'aws', 'gcp', 'css', 'html', 'php', 'ci/cd', 'pmp', 'sap']:
-                    skill = skill.upper()
-                elif skill.lower() in ['javascript', 'typescript', 'python', 'java', 'react', 'angular', 'vue', 'docker', 'kubernetes', 'excel', 'tableau', 'jira', 'figma', 'linux', 'windows']:
-                    skill = skill.capitalize()
-                else:
-                    skill = skill.title()
-                skills.add(skill)
+            if 2 <= len(skill) <= 30 and len(skill.split()) <= 3:
+                skills.add(format_skill(skill))
 
-    return list(skills)[:15]  # Return top 15 skills
+    # Look for capitalized technical terms (often tools/technologies)
+    tech_terms = re.findall(r'\b([A-Z][a-zA-Z0-9]*(?:\.[a-zA-Z]+)?)\b', text)
+    common_words = {'the', 'and', 'for', 'with', 'this', 'that', 'from', 'have', 'been', 'were', 'are', 'was', 'will', 'can', 'may', 'should', 'would', 'could', 'their', 'your', 'our', 'his', 'her', 'its'}
+    for term in tech_terms:
+        if len(term) >= 2 and term.lower() not in common_words:
+            # Check if it appears multiple times (likely a skill/tool)
+            if text_lower.count(term.lower()) >= 2:
+                skills.add(format_skill(term))
+
+    return list(skills)[:20]
+
+def format_skill(skill):
+    """Format skill name with proper capitalization"""
+    skill = skill.strip()
+    if not skill:
+        return skill
+
+    # Common abbreviations that should be uppercase
+    upper_terms = ['sql', 'aws', 'gcp', 'css', 'html', 'php', 'api', 'etl', 'qa', 'hr', 'ai', 'ml', 'nlp', 'xml', 'json', 'sap', 'erp', 'crm', 'ui', 'ux', 'it', 'bi', 'ci', 'cd']
+
+    skill_lower = skill.lower()
+    if skill_lower in upper_terms:
+        return skill.upper()
+
+    # If already has mixed case, preserve it
+    if skill != skill.lower() and skill != skill.upper():
+        return skill
+
+    # Otherwise title case
+    return skill.title()
 
 def analyze_match_with_ai(resume_data, job_text):
-    """Use AI to match resume skills against job description - dynamic matching"""
+    """Use AI to match resume skills against job description with accurate scoring"""
 
-    skills_str = ', '.join(resume_data.get('skills', [])[:20])
+    skills_str = ', '.join(resume_data.get('skills', [])[:25])
 
-    prompt = f"""Compare this candidate's skills to the job requirements.
+    prompt = f"""You are an expert recruiter. Analyze how well this candidate matches the job requirements.
 
 JOB DESCRIPTION:
-{job_text[:1200]}
+{job_text[:1500]}
 
-CANDIDATE:
+CANDIDATE PROFILE:
 - Name: {resume_data.get('name')}
-- Experience: {resume_data.get('experience_years', 0)} years
+- Total Experience: {resume_data.get('experience_years', 0)} years
 - Current Role: {resume_data.get('current_role')}
 - Education: {resume_data.get('education')}
 - Skills: {skills_str}
 
-TASK:
-1. Find skills/requirements FROM THE JOB DESCRIPTION that the candidate HAS
-2. Find skills/requirements FROM THE JOB DESCRIPTION that the candidate is MISSING
-3. Score 0-100 based on how well candidate matches the JOB requirements
-4. Recommend based on score: "Best" (80+), "Good" (65-79), "Average" (50-64), or "Poor" (<50)
+SCORING CRITERIA:
+1. Extract key requirements from the job description (skills, experience, qualifications)
+2. Check which requirements the candidate meets (matched_skills)
+3. Check which requirements the candidate lacks (missing_skills)
+4. Calculate a score 0-100 based on:
+   - Skill match percentage (40% weight)
+   - Experience relevance (30% weight)
+   - Role/domain match (20% weight)
+   - Education fit (10% weight)
 
-Return ONLY JSON:
+5. Recommendation based on score:
+   - "Best": 80-100 (excellent match, should interview)
+   - "Good": 65-79 (strong candidate, worth considering)
+   - "Average": 50-64 (partial match, review carefully)
+   - "Poor": 0-49 (significant gaps, likely not suitable)
+
+Return ONLY valid JSON (no markdown, no explanation):
 {{
   "score": number,
-  "matched_skills": ["job requirements the candidate meets"],
-  "missing_skills": ["job requirements the candidate lacks"],
+  "matched_skills": ["requirement1 the candidate has", "requirement2 the candidate has"],
+  "missing_skills": ["requirement1 the candidate lacks", "requirement2 the candidate lacks"],
   "recommendation": "Best" or "Good" or "Average" or "Poor"
 }}"""
 
     response = call_ai_api([
-        {"role": "system", "content": "Match candidate skills to job requirements. Extract requirements from job description, check if candidate has them. No predefined skill categories."},
+        {"role": "system", "content": "You are a precise recruiter AI. Analyze job fit accurately. Return only valid JSON with realistic scores based on actual skill matches."},
         {"role": "user", "content": prompt}
-    ], max_tokens=500)
+    ], max_tokens=600)
 
     if response:
         try:

@@ -17,14 +17,14 @@ def hash_password(password):
 
 # AI API Configuration - supports Groq (free), Grok (xAI), or OpenAI
 def get_ai_config():
-    # Try Groq first (FREE)
+    # Try Groq first (FREE) - using llama-3.3-70b for better accuracy
     groq_key = os.environ.get('GROQ_API_KEY', '')
     if groq_key:
         return {
             'provider': 'groq',
             'api_key': groq_key,
             'base_url': 'https://api.groq.com/openai/v1/chat/completions',
-            'model': 'llama-3.1-70b-versatile'
+            'model': 'llama-3.3-70b-versatile'
         }
 
     # Try Grok (xAI)
@@ -82,97 +82,87 @@ def call_ai_api(messages, max_tokens=800):
 def extract_resume_with_ai(resume_text, job_description=""):
     """Use AI to extract structured data from resume with high accuracy"""
 
-    jd_context = f"\nJOB DESCRIPTION (use this to identify relevant skills):\n{job_description[:1000]}\n" if job_description else ""
+    # Clean the resume text - handle PDF extraction issues
+    clean_text = resume_text.replace('\x00', '').strip()
+    # Normalize whitespace
+    clean_text = re.sub(r'\s+', ' ', clean_text)
+    # Try to preserve line breaks for structure
+    resume_lines = resume_text.split('\n')
+    first_lines = '\n'.join([l.strip() for l in resume_lines[:20] if l.strip()])
 
-    prompt = f"""You are an expert HR resume parser with years of experience. Your task is to carefully extract accurate information from this resume.
+    jd_context = f"\nJOB DESCRIPTION (use this to identify relevant skills):\n{job_description[:800]}\n" if job_description else ""
 
-CRITICAL EXTRACTION RULES:
+    prompt = f"""Parse this resume and extract candidate information. The text may have formatting issues from PDF extraction.
 
-1. NAME: Extract the candidate's FULL NAME (first name + last name).
-   - Usually at the very top of the resume
-   - NEVER include words like "Resume", "CV", "Updated", "Profile"
-   - If unclear, look for the most prominent name-like text
+FIRST 20 LINES (check here for NAME):
+{first_lines}
 
-2. EMAIL: Extract the email address (format: name@domain.com)
-
-3. PHONE: Extract phone number with country code if available
-
-4. LOCATION: Extract the city/location where candidate is based
-   - Look near contact info section
-   - Common Indian cities: Mumbai, Delhi, Bangalore, Hyderabad, Chennai, Pune, etc.
-
-5. EXPERIENCE: Calculate TOTAL years of professional work experience
-   - Look for explicit mentions like "X years experience"
-   - Or calculate from work history dates (earliest start date to present)
-   - Return as integer
-
-6. CURRENT ROLE: Extract the JOB TITLE from the MOST RECENT/CURRENT position
-   - This should be a proper job title like "HR Executive", "Software Engineer", "Data Analyst"
-   - Look in Work Experience section for the FIRST listed job (most recent)
-   - DO NOT extract descriptions like "handling HR" or "working on projects"
-   - Examples of correct titles: "HR Manager", "Recruitment Specialist", "Senior Developer"
-
-7. CURRENT COMPANY: Name of the current/most recent employer
-
-8. EDUCATION: Highest degree/qualification (e.g., "B.Tech", "MBA", "B.Com")
-
-9. SKILLS: Extract ALL relevant skills mentioned in the resume. Include:
-   - Technical skills (programming, tools, software)
-   - Domain knowledge (HR, Finance, Marketing, etc.)
-   - Professional skills (communication, leadership, project management)
-   - Software proficiency (Excel, SAP, Salesforce, MS Office, etc.)
-   - Certifications mentioned
-   - Extract at least 8-15 skills if available
-   - DO NOT include generic action verbs like "maintain", "manage", "develop"
-   - Include ACTUAL skill names only
+FULL RESUME TEXT:
+{clean_text[:4500]}
 {jd_context}
-RESUME TEXT TO PARSE:
-{resume_text[:5000]}
+EXTRACTION INSTRUCTIONS:
+1. NAME: The person's full name (first + last). Usually the FIRST prominent text. Look for 2-3 capitalized words at the top that form a name. NEVER return "Unknown" - find the actual name.
 
-IMPORTANT: Respond with ONLY valid JSON. No markdown, no code blocks, no explanation.
-Return this exact JSON structure:
-{{
-  "name": "Full Name Here",
-  "email": "email@example.com",
-  "phone": "+91XXXXXXXXXX",
-  "location": "City Name",
-  "experience_years": 5,
-  "current_role": "Actual Job Title",
-  "current_company": "Company Name",
-  "education": "Degree Name",
-  "skills": ["Skill1", "Skill2", "Skill3", "Skill4", "Skill5", "Skill6", "Skill7", "Skill8"]
-}}"""
+2. EMAIL: Email address from the resume
+
+3. PHONE: Phone number with country code
+
+4. LOCATION: City where the person is located
+
+5. EXPERIENCE: Total years of work experience (as number)
+
+6. CURRENT ROLE: Their CURRENT or MOST RECENT job title. Must be a proper title like:
+   - "HR Executive", "Software Engineer", "Data Analyst", "Recruitment Specialist"
+   - Look in Work Experience section for the first/most recent position
+   - Extract the TITLE, not the job description
+
+7. CURRENT COMPANY: Name of current/most recent employer
+
+8. EDUCATION: Highest degree (e.g., B.Tech, MBA, B.Com)
+
+9. SKILLS: List ALL skills found in the resume - technical, soft skills, tools, software, certifications. Extract 8-15 skills minimum.
+
+Return ONLY this JSON (no other text):
+{{"name":"","email":"","phone":"","location":"","experience_years":0,"current_role":"","current_company":"","education":"","skills":[]}}"""
 
     response = call_ai_api([
-        {"role": "system", "content": "You are a precise resume parser. Extract information exactly as it appears in the resume. For current_role, always return an actual job title (like 'HR Executive' or 'Software Engineer'), never a description. For skills, return actual skill names, not action verbs. Return ONLY valid JSON."},
+        {"role": "system", "content": "Extract resume data accurately. Return valid JSON only. For name, find the actual person's name at the top of the resume. For current_role, extract the job title not description. For skills, list actual skills not action verbs."},
         {"role": "user", "content": prompt}
-    ], max_tokens=1500)
+    ], max_tokens=1200)
 
     if response:
         try:
             content = response.strip()
             # Remove markdown code blocks if present
-            if content.startswith('```'):
-                content = re.sub(r'^```json?\s*\n?', '', content)
-                content = re.sub(r'\n?\s*```$', '', content)
+            content = re.sub(r'^```json?\s*\n?', '', content)
+            content = re.sub(r'\n?\s*```\s*$', '', content)
             # Try to find JSON object in the response
-            json_match = re.search(r'\{[\s\S]*\}', content)
+            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', content)
             if json_match:
                 content = json_match.group(0)
             parsed = json.loads(content)
 
-            # Validate and clean the parsed data
+            # Ensure name is not empty
+            if not parsed.get('name') or parsed.get('name') == 'Unknown':
+                # Try to find name from first lines
+                lines = resume_text.split('\n')
+                for line in lines[:10]:
+                    line = line.strip()
+                    if line and len(line) < 40 and not re.search(r'@|http|www\.|phone|email|resume|cv|profile|\d{5,}', line, re.I):
+                        words = line.split()
+                        if 2 <= len(words) <= 4 and all(w[0].isupper() if w else False for w in words):
+                            parsed['name'] = line
+                            break
+
+            # Clean current_role
             if parsed.get('current_role'):
-                # Remove any descriptions, keep only the job title
                 role = parsed['current_role']
-                # If it's too long, it might be a description - try to extract the title
                 if len(role) > 50:
-                    # Take first part before common separators
                     role = re.split(r'[,\-–|]', role)[0].strip()
                 parsed['current_role'] = role
 
             # Clean skills - remove action verbs
-            if parsed.get('skills'):
+            if parsed.get('skills') and isinstance(parsed['skills'], list):
                 action_verbs = {'maintain', 'maintained', 'maintaining', 'manage', 'managed', 'managing',
                                'develop', 'developed', 'developing', 'handle', 'handled', 'handling',
                                'support', 'supported', 'supporting', 'work', 'worked', 'working',
@@ -180,11 +170,13 @@ Return this exact JSON structure:
                                'ensure', 'ensured', 'ensuring', 'responsible', 'responsibilities'}
                 cleaned_skills = []
                 for skill in parsed['skills']:
-                    skill_lower = skill.lower().strip()
-                    if skill_lower not in action_verbs and len(skill) >= 2:
-                        cleaned_skills.append(skill)
+                    if isinstance(skill, str):
+                        skill_lower = skill.lower().strip()
+                        if skill_lower not in action_verbs and len(skill) >= 2:
+                            cleaned_skills.append(skill)
                 parsed['skills'] = cleaned_skills[:20]
 
+            print(f"AI extracted: name={parsed.get('name')}, role={parsed.get('current_role')}, skills={len(parsed.get('skills', []))}")
             return parsed
         except Exception as e:
             print(f"AI response parsing error: {e}")

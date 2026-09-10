@@ -2,183 +2,269 @@ from flask import Flask, request, jsonify, make_response
 import re
 import os
 import hashlib
+import json
+import urllib.request
+import urllib.error
 
 app = Flask(__name__)
 
-# Authentication - Password stored in Vercel environment variable
+# Authentication
 def get_password():
     return os.environ.get('APP_PASSWORD', '')
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
-# Common words to ignore when extracting keywords
-STOP_WORDS = {
-    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with",
-    "by", "from", "as", "is", "are", "was", "were", "be", "been", "being", "have", "has",
-    "had", "do", "does", "did", "will", "would", "could", "should", "may", "might", "must",
-    "shall", "can", "need", "dare", "ought", "used", "it", "its", "this", "that", "these",
-    "those", "i", "you", "he", "she", "we", "they", "what", "which", "who", "whom", "whose",
-    "where", "when", "why", "how", "all", "each", "every", "both", "few", "more", "most",
-    "other", "some", "such", "no", "nor", "not", "only", "own", "same", "so", "than", "too",
-    "very", "just", "also", "now", "here", "there", "then", "once", "if", "any", "about",
-    "into", "through", "during", "before", "after", "above", "below", "between", "under",
-    "over", "out", "up", "down", "off", "again", "further", "able", "our", "your", "their",
-    "etc", "including", "work", "working", "experience", "years", "year", "strong", "good",
-    "excellent", "preferred", "required", "requirements", "responsibilities", "role", "position",
-    "job", "candidate", "looking", "seeking", "must", "ability", "skills", "skill"
-}
+# AI API Configuration - supports Groq (free), Grok (xAI), or OpenAI
+def get_ai_config():
+    # Try Groq first (FREE)
+    groq_key = os.environ.get('GROQ_API_KEY', '')
+    if groq_key:
+        return {
+            'provider': 'groq',
+            'api_key': groq_key,
+            'base_url': 'https://api.groq.com/openai/v1/chat/completions',
+            'model': 'llama-3.1-70b-versatile'
+        }
 
-def normalize_text(text):
-    return re.sub(r"[^a-z0-9\s-]", " ", text.lower())
+    # Try Grok (xAI)
+    grok_key = os.environ.get('GROK_API_KEY', '') or os.environ.get('XAI_API_KEY', '')
+    if grok_key:
+        return {
+            'provider': 'grok',
+            'api_key': grok_key,
+            'base_url': 'https://api.x.ai/v1/chat/completions',
+            'model': 'grok-beta'
+        }
 
-def extract_keywords_from_text(text, min_length=3):
-    """Extract meaningful keywords from any text (job description or resume)"""
-    normalized = normalize_text(text)
-    words = re.findall(r'\b[a-z][a-z0-9+#.-]*\b', normalized)
-
-    # Filter out stop words and short words
-    keywords = []
-    for word in words:
-        if len(word) >= min_length and word not in STOP_WORDS:
-            keywords.append(word)
-
-    # Also extract multi-word phrases (2-3 words)
-    phrases = re.findall(r'\b([a-z]+\s+[a-z]+(?:\s+[a-z]+)?)\b', normalized)
-    for phrase in phrases:
-        words_in_phrase = phrase.split()
-        # Keep phrase if it's not all stop words
-        if not all(w in STOP_WORDS for w in words_in_phrase):
-            keywords.append(phrase.replace(' ', '_'))
-
-    return list(set(keywords))
-
-def extract_name_from_resume(text):
-    """Extract candidate name from resume text - usually at the top"""
-    lines = [l.strip() for l in text.split('\n') if l.strip()]
-
-    for i, line in enumerate(lines[:5]):
-        # Skip common headers
-        if re.match(r'^(resume|curriculum|cv|profile|summary|objective|contact|address|phone|email|linkedin)', line, re.I):
-            continue
-        # Skip emails, URLs, phone numbers
-        if re.search(r'@|http|www\.|\.com|\.org|\.net', line, re.I):
-            continue
-        if re.match(r'^\+?\d[\d\s\-().]{8,}', line):
-            continue
-        if len(line) > 50 or len(line) < 3:
-            continue
-
-        # Check for name pattern (2-4 capitalized words)
-        match = re.match(r'^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})$', line)
-        if match:
-            return match.group(1)
-
-        # First line with 2-4 capitalized words
-        if i == 0:
-            words = line.split()
-            if 2 <= len(words) <= 4 and all(w[0].isupper() for w in words if w):
-                return line
+    # Try OpenAI
+    openai_key = os.environ.get('OPENAI_API_KEY', '')
+    if openai_key:
+        return {
+            'provider': 'openai',
+            'api_key': openai_key,
+            'base_url': 'https://api.openai.com/v1/chat/completions',
+            'model': 'gpt-3.5-turbo'
+        }
 
     return None
 
-def extract_email_from_resume(text):
-    """Extract email from resume text"""
-    match = re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
-    return match.group(0) if match else ''
+def call_ai_api(messages, max_tokens=800):
+    config = get_ai_config()
+    if not config:
+        return None
 
-def extract_phone_from_resume(text):
-    """Extract phone from resume text"""
-    patterns = [
-        r'(?:\+91[\s-]?)?[6-9]\d{9}',  # Indian mobile
-        r'(?:\+1[\s-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}',  # US format
-        r'\+\d{1,3}[\s-]?\d{6,14}'  # International
+    try:
+        data = json.dumps({
+            "model": config['model'],
+            "messages": messages,
+            "temperature": 0.1,
+            "max_tokens": max_tokens
+        }).encode('utf-8')
+
+        req = urllib.request.Request(
+            config['base_url'],
+            data=data,
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {config["api_key"]}'
+            }
+        )
+
+        with urllib.request.urlopen(req, timeout=60) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            return result['choices'][0]['message']['content'].strip()
+
+    except Exception as e:
+        print(f"AI API error ({config['provider']}): {e}")
+        return None
+
+def extract_resume_with_ai(resume_text, job_description=""):
+    """Use AI to extract structured data from resume - no hardcoded skills"""
+
+    jd_context = f"\nJOB REQUIREMENTS (for context):\n{job_description[:500]}\n" if job_description else ""
+
+    prompt = f"""Extract information from this resume. Return ONLY valid JSON.
+
+Extract ALL skills mentioned - technical skills, soft skills, tools, methodologies, certifications, languages, domain knowledge. Do not limit to any predefined list.
+{jd_context}
+RESUME TEXT:
+{resume_text[:3500]}
+
+Return this JSON format:
+{{
+  "name": "full name",
+  "email": "email address",
+  "phone": "phone with country code",
+  "location": "city, country",
+  "experience_years": number,
+  "current_role": "most recent job title",
+  "current_company": "most recent company",
+  "education": "highest degree",
+  "skills": ["all skills found in resume - technical, soft skills, tools, domain expertise"]
+}}
+
+Return ONLY JSON, no explanation."""
+
+    response = call_ai_api([
+        {"role": "system", "content": "Extract resume data into JSON. Find ALL skills - technical, soft skills, tools, certifications, domain knowledge. No predefined skill list."},
+        {"role": "user", "content": prompt}
+    ])
+
+    if response:
+        try:
+            content = response.strip()
+            if content.startswith('```'):
+                content = re.sub(r'^```json?\n?', '', content)
+                content = re.sub(r'\n?```$', '', content)
+            return json.loads(content)
+        except:
+            pass
+
+    return extract_resume_basic(resume_text)
+
+def extract_resume_basic(resume_text):
+    """Basic regex extraction fallback when no AI available"""
+    text = resume_text.replace('\n', ' ')
+
+    email_match = re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
+
+    phone_patterns = [
+        r'\+91[\s\-]?\d{4}[\s\-]?\d{3}[\s\-]?\d{3}',
+        r'\+91[\s\-]?[6-9]\d{9}',
+        r'[6-9]\d{9}',
+        r'\+1[\s\-]?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{4}'
     ]
-    for pattern in patterns:
+    phone = ''
+    for pattern in phone_patterns:
         match = re.search(pattern, text)
         if match:
-            return re.sub(r'\s+', '', match.group(0))
-    return ''
+            phone = re.sub(r'[\s\-]', '', match.group(0))
+            break
 
-def extract_experience_from_resume(text):
-    """Extract years of experience from resume text"""
-    patterns = [
-        r'(\d+)\+?\s*(?:years?|yrs?)[\s\w]*(?:of\s+)?(?:experience|exp|in)',
-        r'(?:experience|exp)[\s:]*(\d+)\+?\s*(?:years?|yrs?)',
-        r'(?:total|overall)[\s\w]*(\d+)\+?\s*(?:years?|yrs?)'
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text, re.I)
-        if match:
-            return int(match.group(1))
-    return 0
+    lines = resume_text.split('\n')
+    name = ''
+    for line in lines[:5]:
+        line = line.strip()
+        if 2 < len(line) < 40 and not re.search(r'@|http|\+\d|^\d', line):
+            words = line.split()
+            if 2 <= len(words) <= 4 and all(w[0].isupper() for w in words if w):
+                name = line
+                break
+
+    return {
+        "name": name or "Unknown",
+        "email": email_match.group(0) if email_match else "",
+        "phone": phone,
+        "location": "",
+        "experience_years": 0,
+        "current_role": "",
+        "current_company": "",
+        "education": "",
+        "skills": []
+    }
+
+def analyze_match_with_ai(resume_data, job_text):
+    """Use AI to match resume skills against job description - dynamic matching"""
+
+    skills_str = ', '.join(resume_data.get('skills', [])[:20])
+
+    prompt = f"""Compare this candidate's skills to the job requirements.
+
+JOB DESCRIPTION:
+{job_text[:1200]}
+
+CANDIDATE:
+- Name: {resume_data.get('name')}
+- Experience: {resume_data.get('experience_years', 0)} years
+- Current Role: {resume_data.get('current_role')}
+- Education: {resume_data.get('education')}
+- Skills: {skills_str}
+
+TASK:
+1. Find skills/requirements FROM THE JOB DESCRIPTION that the candidate HAS
+2. Find skills/requirements FROM THE JOB DESCRIPTION that the candidate is MISSING
+3. Score 0-100 based on how well candidate matches the JOB requirements
+4. Recommend: "Shortlist" (75+), "Review" (50-74), or "Pool" (<50)
+
+Return ONLY JSON:
+{{
+  "score": number,
+  "matched_skills": ["job requirements the candidate meets"],
+  "missing_skills": ["job requirements the candidate lacks"],
+  "recommendation": "Shortlist" or "Review" or "Pool"
+}}"""
+
+    response = call_ai_api([
+        {"role": "system", "content": "Match candidate skills to job requirements. Extract requirements from job description, check if candidate has them. No predefined skill categories."},
+        {"role": "user", "content": prompt}
+    ], max_tokens=500)
+
+    if response:
+        try:
+            content = response.strip()
+            if content.startswith('```'):
+                content = re.sub(r'^```json?\n?', '', content)
+                content = re.sub(r'\n?```$', '', content)
+            return json.loads(content)
+        except:
+            pass
+
+    return {
+        "score": 50,
+        "matched_skills": resume_data.get('skills', [])[:5],
+        "missing_skills": [],
+        "recommendation": "Review"
+    }
 
 def analyze_resumes(job_text, candidates):
-    """
-    Analyze resumes against job description using dynamic keyword matching.
-    Works for ANY type of job - technical, non-technical, or mixed.
-    """
-    # Extract keywords from job description
-    job_keywords = extract_keywords_from_text(job_text)
-
+    """Analyze resumes against job description using AI"""
     ranking = []
+
     for c in candidates:
         resume_text = c.get("resume", "")
-        normalized_resume = normalize_text(resume_text)
 
-        # Extract keywords from resume
-        resume_keywords = extract_keywords_from_text(resume_text)
+        # Extract with AI
+        extracted = extract_resume_with_ai(resume_text, job_text)
 
-        # Find matching keywords between job and resume
-        matched_keywords = []
-        missing_keywords = []
+        # Merge frontend data with AI extraction
+        name = c.get("name") or extracted.get("name") or "Unknown"
+        email = c.get("email") or extracted.get("email") or ""
+        phone = c.get("phone") or extracted.get("phone") or ""
+        location = c.get("location") or extracted.get("location") or ""
+        experience = c.get("experience") or extracted.get("experience_years") or 0
+        current_role = c.get("currentRole") or extracted.get("current_role") or ""
+        current_company = c.get("currentCompany") or extracted.get("current_company") or ""
+        education = c.get("education") or extracted.get("education") or ""
+        skills = extracted.get("skills") or []
 
-        for keyword in job_keywords:
-            # Check both exact match and word presence
-            keyword_clean = keyword.replace('_', ' ')
-            if keyword in resume_keywords or keyword_clean in normalized_resume:
-                matched_keywords.append(keyword_clean)
-            else:
-                missing_keywords.append(keyword_clean)
+        # Match against job description
+        match_result = analyze_match_with_ai({
+            "name": name,
+            "experience_years": experience,
+            "current_role": current_role,
+            "skills": skills,
+            "education": education
+        }, job_text)
 
-        # Calculate match percentage
-        total_job_keywords = len(job_keywords) if job_keywords else 1
-        match_percentage = len(matched_keywords) / total_job_keywords
-
-        # Score breakdown:
-        # - Keyword match: up to 70 points (main factor)
-        # - Experience bonus: up to 15 points
-        # - Content length/depth: up to 15 points
-
-        keyword_score = round(match_percentage * 70)
-
-        exp = c.get("experience") or 0
-        exp_score = min(15, exp * 2) if exp > 0 else 0
-
-        # Content depth score (longer, more detailed resumes score slightly higher)
-        content_length = len(resume_text)
-        depth_score = min(15, content_length // 500)  # 1 point per 500 chars, max 15
-
-        total_score = min(100, max(0, keyword_score + exp_score + depth_score))
-
+        config = get_ai_config()
         ranking.append({
-            "name": c.get("name", "Unknown"),
-            "title": c.get("title") or c.get("currentRole") or "",
-            "experience": exp,
-            "email": c.get("email") or "",
-            "phone": c.get("phone") or "",
-            "location": c.get("location") or "",
-            "linkedin": c.get("linkedin") or "",
-            "currentRole": c.get("currentRole") or c.get("title") or "",
-            "currentCompany": c.get("currentCompany") or "",
-            "education": c.get("education") or "",
-            "skills": matched_keywords[:10],  # Top 10 matched skills
-            "coveredSkills": matched_keywords,
-            "missingSkills": missing_keywords[:10],  # Top 10 missing
-            "score": total_score,
-            "matchPercentage": round(match_percentage * 100),
-            "resumeText": resume_text[:180],
-            "analyzedBy": "dynamic-keyword-matching"
+            "name": name,
+            "email": email,
+            "phone": phone,
+            "location": location,
+            "experience": experience,
+            "currentRole": current_role,
+            "currentCompany": current_company,
+            "education": education,
+            "skills": match_result.get("matched_skills", skills[:10]),
+            "coveredSkills": match_result.get("matched_skills", []),
+            "missingSkills": match_result.get("missing_skills", []),
+            "score": match_result.get("score", 50),
+            "recommendation": match_result.get("recommendation", "Review"),
+            "linkedin": c.get("linkedin", ""),
+            "title": current_role,
+            "analyzedBy": config['provider'] if config else "basic"
         })
 
     ranking.sort(key=lambda x: x["score"], reverse=True)
@@ -187,7 +273,6 @@ def analyze_resumes(job_text, candidates):
 @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'OPTIONS'])
 @app.route('/<path:path>', methods=['GET', 'POST', 'OPTIONS'])
 def catch_all(path):
-    # Handle CORS
     if request.method == 'OPTIONS':
         response = make_response()
         response.headers['Access-Control-Allow-Origin'] = '*'
@@ -195,33 +280,34 @@ def catch_all(path):
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
         return response
 
-    # Handle GET - API info endpoint
     if request.method == 'GET':
+        config = get_ai_config()
         response = jsonify({
             "api": "Smart Screener",
-            "version": "1.0",
-            "message": "Use POST to analyze resumes"
+            "version": "2.0",
+            "ai_enabled": config is not None,
+            "ai_provider": config['provider'] if config else None,
+            "message": f"Using {config['provider'].upper()} AI" if config else "No AI key configured. Add GROQ_API_KEY (free) in Vercel."
         })
         response.headers['Access-Control-Allow-Origin'] = '*'
         return response
 
-    # Handle POST
     if request.method == 'POST':
         try:
             data = request.get_json(force=True) or {}
         except:
             data = {}
 
-        # Auth request
+        # Auth check
         if 'password' in data and 'jobDescription' not in data:
-            submitted_password = data.get("password", "")
-            correct_password = get_password()
+            submitted = data.get("password", "")
+            correct = get_password()
 
-            if not correct_password:
-                response = jsonify({"success": False, "error": "Password not configured. Set APP_PASSWORD in Vercel."})
+            if not correct:
+                response = jsonify({"success": False, "error": "Set APP_PASSWORD in Vercel"})
                 response.status_code = 500
-            elif submitted_password == correct_password:
-                token = hash_password(correct_password + "smart-screener-session")
+            elif submitted == correct:
+                token = hash_password(correct + "smart-screener-session")
                 response = jsonify({"success": True, "token": token})
             else:
                 response = jsonify({"success": False, "error": "Invalid password"})
@@ -229,13 +315,12 @@ def catch_all(path):
             response.headers['Access-Control-Allow-Origin'] = '*'
             return response
 
-        # Ranking request
+        # Resume analysis
         job_text = data.get("jobDescription") or ""
         uploaded = data.get("resumes") or []
 
-        # Validate inputs
         if not job_text:
-            response = jsonify({"error": "Job description is required", "ranking": []})
+            response = jsonify({"error": "Job description required", "ranking": []})
             response.status_code = 400
             response.headers['Access-Control-Allow-Origin'] = '*'
             return response
@@ -246,50 +331,32 @@ def catch_all(path):
             response.headers['Access-Control-Allow-Origin'] = '*'
             return response
 
-        # Process uploaded resumes
         candidates = []
-        for i, item in enumerate(uploaded):
+        for item in uploaded:
             if isinstance(item, dict):
-                resume_text = item.get("resume") or item.get("text") or item.get("content") or ""
-
-                # Use frontend extraction, but fallback to server-side extraction
-                name = item.get("name") or extract_name_from_resume(resume_text) or f"Candidate {i+1}"
-                email = item.get("email") or extract_email_from_resume(resume_text)
-                phone = item.get("phone") or extract_phone_from_resume(resume_text)
-                experience = item.get("experience") or extract_experience_from_resume(resume_text)
-
                 candidates.append({
-                    "name": name,
-                    "title": item.get("currentRole") or item.get("title") or "",
-                    "experience": experience,
-                    "email": email,
-                    "phone": phone,
-                    "location": item.get("location") or "",
-                    "linkedin": item.get("linkedin") or "",
-                    "currentRole": item.get("currentRole") or "",
-                    "currentCompany": item.get("currentCompany") or "",
-                    "education": item.get("education") or "",
-                    "skills": item.get("skills") or [],
-                    "resume": resume_text
+                    "name": item.get("name", ""),
+                    "email": item.get("email", ""),
+                    "phone": item.get("phone", ""),
+                    "location": item.get("location", ""),
+                    "experience": item.get("experience", 0),
+                    "currentRole": item.get("currentRole", ""),
+                    "currentCompany": item.get("currentCompany", ""),
+                    "education": item.get("education", ""),
+                    "linkedin": item.get("linkedin", ""),
+                    "resume": item.get("resume") or item.get("text") or ""
                 })
             else:
-                resume_text = str(item)
-                candidates.append({
-                    "name": extract_name_from_resume(resume_text) or f"Candidate {i+1}",
-                    "title": "",
-                    "experience": extract_experience_from_resume(resume_text),
-                    "email": extract_email_from_resume(resume_text),
-                    "phone": extract_phone_from_resume(resume_text),
-                    "skills": [],
-                    "resume": resume_text
-                })
+                candidates.append({"resume": str(item)})
 
+        config = get_ai_config()
         ranking = analyze_resumes(job_text, candidates)
+
         response = jsonify({
             "ranking": ranking,
-            "jobDescription": job_text,
             "candidateCount": len(ranking),
-            "bestCandidate": ranking[0] if ranking else None
+            "bestCandidate": ranking[0] if ranking else None,
+            "ai_provider": config['provider'] if config else "basic"
         })
         response.headers['Access-Control-Allow-Origin'] = '*'
         return response

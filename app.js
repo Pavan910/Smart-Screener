@@ -280,38 +280,38 @@ function capitalize(value) {
 
 // Extract candidate name from resume text
 function extractCandidateName(text, fileName) {
-  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  // Clean and normalize text - PDF extraction often has weird spacing
+  const cleanText = text.replace(/\s+/g, ' ').trim();
+  const lines = text.split(/\n/).map(l => l.replace(/\s+/g, ' ').trim()).filter(l => l.length > 0);
 
   // Try to find name in first few lines (usually at the top of resume)
-  for (let i = 0; i < Math.min(lines.length, 5); i++) {
+  for (let i = 0; i < Math.min(lines.length, 8); i++) {
     const line = lines[i];
 
     // Skip lines that look like headers, emails, phones, or URLs
-    if (line.match(/^(resume|curriculum|cv|profile|summary|objective|contact|address|phone|email|linkedin)/i)) continue;
-    if (line.match(/@|http|www\.|\.com|\.org|\.net/i)) continue;
-    if (line.match(/^\+?\d[\d\s\-().]{8,}/)) continue; // Phone numbers
-    if (line.length > 50) continue; // Too long to be a name
+    if (line.match(/^(resume|curriculum|cv|profile|summary|objective|contact|address|phone|email|linkedin|professional)/i)) continue;
+    if (line.match(/@|http|www\.|\.com|\.org|\.net|\.in\//i)) continue;
+    if (line.match(/^\+?\d[\d\s\-().]{6,}/)) continue; // Phone numbers
+    if (line.length > 40) continue; // Too long to be just a name
     if (line.length < 3) continue; // Too short
 
-    // Check if it looks like a name (2-4 capitalized words)
-    const namePattern = /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})$/;
-    const match = line.match(namePattern);
-    if (match) {
-      return match[1];
+    // Clean the line - remove special chars at start/end
+    const cleanLine = line.replace(/^[\s|•\-:]+|[\s|•\-:]+$/g, '').trim();
+
+    // Check if it looks like a name (2-4 words, mostly letters)
+    const words = cleanLine.split(/\s+/).filter(w => w.length > 0);
+    if (words.length >= 2 && words.length <= 4) {
+      // Check if words look like name parts (start with capital, mostly letters)
+      const looksLikeName = words.every(w => /^[A-Z][a-zA-Z]*$/.test(w));
+      if (looksLikeName) {
+        return cleanLine;
+      }
     }
 
     // Also try: "Name: John Doe" format
     const labeledName = line.match(/^(?:name|candidate|applicant):\s*(.+)/i);
     if (labeledName) {
       return labeledName[1].trim();
-    }
-
-    // If first line has 2-4 words and starts with capital, likely a name
-    if (i === 0) {
-      const words = line.split(/\s+/);
-      if (words.length >= 2 && words.length <= 4 && words.every(w => /^[A-Z]/.test(w))) {
-        return line;
-      }
     }
   }
 
@@ -321,60 +321,91 @@ function extractCandidateName(text, fileName) {
 
 // Extract contact info from resume text
 function extractContactInfo(text) {
-  // Better email pattern
-  const emailMatch = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+  // Normalize text for better matching
+  const normalizedText = text.replace(/\s+/g, ' ');
 
-  // Better phone pattern - handles various formats
+  // Better email pattern
+  const emailMatch = normalizedText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+
+  // Better phone patterns - handles various formats including spaces
   const phonePatterns = [
-    /(?:\+91[\s-]?)?[6-9]\d{9}/, // Indian mobile
-    /(?:\+1[\s-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/, // US format
-    /\+\d{1,3}[\s-]?\d{6,14}/ // International
+    /\+91[\s\-]?\d{4}[\s\-]?\d{3}[\s\-]?\d{3}/, // Indian: +91 6351 182 302
+    /\+91[\s\-]?\d{5}[\s\-]?\d{5}/, // Indian: +91 63511 82302
+    /\+91[\s\-]?[6-9]\d{9}/, // Indian: +91 6351182302
+    /[6-9]\d{4}[\s\-]?\d{3}[\s\-]?\d{3}/, // Indian without +91: 6351 182 302
+    /[6-9]\d{9}/, // Indian 10 digits
+    /\+1[\s\-]?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{4}/, // US format
+    /\(?\d{3}\)?[\s\-.]?\d{3}[\s\-.]?\d{4}/, // US without +1
+    /\+\d{1,3}[\s\-]?\d{6,14}/ // International
   ];
 
   let phone = '';
   for (const pattern of phonePatterns) {
-    const match = text.match(pattern);
+    const match = normalizedText.match(pattern);
     if (match) {
-      phone = match[0].replace(/\s+/g, '');
+      // Clean up the phone number - remove spaces but keep + if present
+      phone = match[0].replace(/[\s\-]/g, '');
       break;
     }
   }
 
-  const linkedinMatch = text.match(/(?:linkedin\.com\/in\/|linkedin:\s*)([a-zA-Z0-9_-]+)/i);
+  // LinkedIn - handle various formats
+  const linkedinPatterns = [
+    /linkedin\.com\/in\/([a-zA-Z0-9_-]+)/i,
+    /linkedin:\s*(?:https?:\/\/)?(?:www\.)?linkedin\.com\/in\/([a-zA-Z0-9_-]+)/i,
+    /linkedin\s*[:\|]\s*([a-zA-Z0-9_-]+)/i
+  ];
+
+  let linkedin = '';
+  for (const pattern of linkedinPatterns) {
+    const match = normalizedText.match(pattern);
+    if (match) {
+      linkedin = 'https://linkedin.com/in/' + match[1];
+      break;
+    }
+  }
 
   return {
     email: emailMatch ? emailMatch[0] : '',
     phone: phone,
-    linkedin: linkedinMatch ? 'https://linkedin.com/in/' + linkedinMatch[1] : ''
+    linkedin: linkedin
   };
 }
 
 // Extract location from resume text
 function extractLocation(text) {
+  const normalizedText = text.replace(/\s+/g, ' ');
+
   const locationPatterns = [
     // Labeled locations
-    /(?:Location|Address|City|Based in|residing at):\s*([^\n|,]+(?:,\s*[^\n|]+)?)/i,
-    // City, State/Country format
-    /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*,\s*(?:India|USA|UK|Canada|Australia|[A-Z]{2}))/,
-    // Indian cities
-    /(Mumbai|Delhi|Bangalore|Bengaluru|Hyderabad|Chennai|Kolkata|Pune|Ahmedabad|Jaipur|Noida|Gurgaon|Gurugram)/i,
-    // US states
+    /(?:Location|Address|City|Based in|residing at|located at):\s*([A-Za-z\s,]+(?:India|USA|UK|Canada|Australia)?)/i,
+    // Indian cities with state/country
+    /((?:Mumbai|Delhi|Bangalore|Bengaluru|Hyderabad|Chennai|Kolkata|Pune|Ahmedabad|Jaipur|Noida|Gurgaon|Gurugram|Vadodara|Baroda|Surat|Lucknow|Chandigarh|Indore|Bhopal|Coimbatore|Kochi|Trivandrum|Mysore|Nagpur|Patna|Ranchi|Bhubaneswar)(?:,?\s*(?:India|Maharashtra|Karnataka|Gujarat|Tamil Nadu|Telangana|Kerala|Rajasthan|UP|MP|WB))?)/i,
+    // US cities with state
     /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*,\s*(?:CA|NY|TX|FL|WA|IL|PA|OH|GA|NC|MI|NJ|VA|AZ|MA|TN|IN|MO|MD|WI|CO|MN|SC|AL|LA|KY|OR|OK|CT|UT|IA|NV|AR|MS|KS|NM|NE|WV|ID|HI|NH|ME|MT|RI|DE|SD|ND|AK|VT|WY|DC))/,
     // Remote/Hybrid
     /(Remote|Hybrid|On-site|Work from home)/i
   ];
 
   for (const pattern of locationPatterns) {
-    const match = text.match(pattern);
-    if (match) return (match[1] || match[0]).trim();
+    const match = normalizedText.match(pattern);
+    if (match) {
+      const location = (match[1] || match[0]).trim();
+      // Don't return if it looks like a department name
+      if (location.match(/^(Finance|IT|HR|Marketing|Sales|Legal|Operations)$/i)) {
+        continue;
+      }
+      return location;
+    }
   }
   return '';
 }
 
 // Extract experience info - more robust
 function extractExperience(text) {
+  // First try explicit experience mentions
   const patterns = [
-    /(\d+)\+?\s*(?:years?|yrs?)[\s\w]*(?:of\s+)?(?:experience|exp|in)/i,
+    /(\d+)\+?\s*(?:years?|yrs?)[\s\w]*(?:of\s+)?(?:experience|exp)/i,
     /(?:experience|exp)[\s:]*(\d+)\+?\s*(?:years?|yrs?)/i,
     /(?:total|overall)[\s\w]*(\d+)\+?\s*(?:years?|yrs?)/i,
     /(\d+)\+?\s*(?:years?|yrs?)[\s\w]*(?:professional|work|industry)/i
@@ -384,34 +415,105 @@ function extractExperience(text) {
     const match = text.match(pattern);
     if (match) return parseInt(match[1]);
   }
+
+  // Calculate from work history dates
+  const currentYear = new Date().getFullYear();
+  const datePatterns = [
+    /(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s,]*(\d{4})\s*[-–]\s*(?:present|current|now)/gi,
+    /(\d{1,2}\/\d{4})\s*[-–]\s*(?:present|current|now)/gi,
+    /(\d{4})\s*[-–]\s*(?:present|current|now)/gi
+  ];
+
+  let earliestYear = currentYear;
+  for (const pattern of datePatterns) {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const year = parseInt(match[1].length === 4 ? match[1] : match[1].split('/')[1]);
+      if (year >= 1990 && year <= currentYear && year < earliestYear) {
+        earliestYear = year;
+      }
+    }
+  }
+
+  // Also look for date ranges in work history
+  const rangePattern = /(\d{4})\s*[-–]\s*(\d{4}|present|current|now)/gi;
+  let match;
+  while ((match = rangePattern.exec(text)) !== null) {
+    const startYear = parseInt(match[1]);
+    if (startYear >= 1990 && startYear <= currentYear && startYear < earliestYear) {
+      earliestYear = startYear;
+    }
+  }
+
+  if (earliestYear < currentYear) {
+    return currentYear - earliestYear;
+  }
+
   return 0;
 }
 
 // Extract current role and company - improved
 function extractCurrentRole(text) {
-  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  const lines = text.split(/\n/).map(l => l.replace(/\s+/g, ' ').trim()).filter(l => l.length > 0);
   let currentRole = '';
   let currentCompany = '';
 
-  // Common job title keywords
-  const titleKeywords = /^(Senior|Junior|Lead|Principal|Staff|Chief|Head|Director|Manager|Engineer|Developer|Analyst|Specialist|Consultant|Associate|Executive|Architect|Designer|Coordinator|Administrator|Officer|VP|AVP|SVP|CEO|CTO|CFO|COO)/i;
+  // Common job title patterns
+  const titlePatterns = [
+    // "Financial Analyst – Client Communication Representative" format
+    /^((?:Senior|Junior|Lead|Principal|Staff|Chief|Head|Director|Manager|Engineer|Developer|Analyst|Specialist|Consultant|Associate|Executive|Architect|Designer|Coordinator|Administrator|Officer|VP|AVP|SVP|CEO|CTO|CFO|COO|Financial|Software|Data|Product|Project|Business|Marketing|Sales|HR|Human|Operations|Quality|Technical|IT|Web|Mobile|Full[\s-]?Stack|Front[\s-]?End|Back[\s-]?End)[^•\n]{0,60})/i,
+  ];
 
-  for (let i = 0; i < Math.min(lines.length, 25); i++) {
+  // Look for work experience section
+  let inWorkSection = false;
+  for (let i = 0; i < Math.min(lines.length, 50); i++) {
     const line = lines[i];
 
-    // Pattern: "Title at Company" or "Title | Company" or "Title - Company"
-    if (titleKeywords.test(line)) {
-      const parts = line.split(/\s+(?:at|@|[-|])\s+/i);
-      currentRole = parts[0].trim();
-      if (parts[1]) currentCompany = parts[1].trim();
-      break;
+    // Check if we're entering work experience section
+    if (line.match(/^(work\s+experience|experience|employment|professional\s+experience)/i)) {
+      inWorkSection = true;
+      continue;
     }
 
-    // Pattern: "Current: Title"
-    const currentMatch = line.match(/(?:current|present|latest)[\s:]+(.+)/i);
-    if (currentMatch) {
-      currentRole = currentMatch[1].trim();
-      break;
+    // In work section, look for company and role
+    if (inWorkSection) {
+      // Pattern: "Company Name | Date - Date" or "Company Name (Date)"
+      const companyMatch = line.match(/^([A-Z][^|•\n]{3,40})\s*[\|]\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d)/i);
+      if (companyMatch && !currentCompany) {
+        currentCompany = companyMatch[1].trim();
+        continue;
+      }
+
+      // Look for job title after company
+      for (const pattern of titlePatterns) {
+        const match = line.match(pattern);
+        if (match && !currentRole) {
+          // Clean the role - take only the title part, not bullet points
+          currentRole = match[1].replace(/[•\-]\s*$/, '').trim();
+          // Limit length
+          if (currentRole.length > 50) {
+            currentRole = currentRole.substring(0, 50).replace(/\s+\S*$/, '');
+          }
+          break;
+        }
+      }
+
+      // Stop after finding both
+      if (currentRole && currentCompany) break;
+    }
+
+    // Also check outside work section for title keywords
+    if (!currentRole) {
+      for (const pattern of titlePatterns) {
+        const match = line.match(pattern);
+        if (match && line.length < 80) {
+          currentRole = match[1].replace(/[•\-]\s*$/, '').trim();
+          if (currentRole.length > 50) {
+            currentRole = currentRole.substring(0, 50).replace(/\s+\S*$/, '');
+          }
+          break;
+        }
+      }
     }
   }
 
@@ -420,18 +522,30 @@ function extractCurrentRole(text) {
 
 // Extract education - improved
 function extractEducation(text) {
+  const normalizedText = text.replace(/\s+/g, ' ');
+
   const eduPatterns = [
+    // Full degree with field - "Bachelor of Commerce (B.Com)"
+    /(Bachelor\s+of\s+[A-Za-z\s]+(?:\([^)]+\))?)/i,
+    /(Master\s+of\s+[A-Za-z\s]+(?:\([^)]+\))?)/i,
+    // Short forms - B.Com, B.Tech, M.Tech, etc.
+    /(B\.?Com|B\.?Tech|M\.?Tech|B\.?E|M\.?E|B\.?Sc|M\.?Sc|BCA|MCA|BBA|MBA|B\.?A|M\.?A|B\.?S|M\.?S|PhD|Ph\.D)/i,
     // Degree patterns
-    /((?:Bachelor|Master|Doctor|PhD|Ph\.D|MBA|B\.S\.|M\.S\.|B\.A\.|M\.A\.|B\.Tech|M\.Tech|B\.E\.|M\.E\.|B\.Sc|M\.Sc|BCA|MCA|BBA)[^.\n,]*(?:in\s+[A-Za-z\s]+)?)/i,
-    // Field of study
-    /(?:degree|studied|graduated)[\s\w]*(?:in\s+)?(Computer Science|Engineering|Business|Mathematics|Statistics|Data Science|Information Technology|Economics|Finance|Management)/i,
+    /((?:Bachelor|Master|Doctor|PhD|Ph\.D|MBA)[^.\n,]{0,50})/i,
     // University names
-    /((?:University|Institute|College)\s+of\s+[A-Za-z\s]+|IIT|IIM|NIT|BITS)/i
+    /((?:University|Institute|College)\s+of\s+[A-Za-z\s]{3,30}|IIT\s*[A-Za-z]*|IIM\s*[A-Za-z]*|NIT\s*[A-Za-z]*|BITS\s*[A-Za-z]*)/i
   ];
 
   for (const pattern of eduPatterns) {
-    const match = text.match(pattern);
-    if (match) return match[1] ? match[1].trim() : match[0].trim();
+    const match = normalizedText.match(pattern);
+    if (match) {
+      let education = match[1] ? match[1].trim() : match[0].trim();
+      // Limit length
+      if (education.length > 60) {
+        education = education.substring(0, 60);
+      }
+      return education;
+    }
   }
   return '';
 }

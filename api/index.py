@@ -17,14 +17,14 @@ def hash_password(password):
 
 # AI API Configuration - supports Groq (free), Grok (xAI), or OpenAI
 def get_ai_config():
-    # Try Groq first (FREE) - using llama-3.3-70b for better accuracy
+    # Try Groq first (FREE) - using mixtral for reliable performance
     groq_key = os.environ.get('GROQ_API_KEY', '')
     if groq_key:
         return {
             'provider': 'groq',
             'api_key': groq_key,
             'base_url': 'https://api.groq.com/openai/v1/chat/completions',
-            'model': 'llama-3.3-70b-versatile'
+            'model': 'mixtral-8x7b-32768'
         }
 
     # Try Grok (xAI)

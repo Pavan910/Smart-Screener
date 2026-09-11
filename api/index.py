@@ -143,33 +143,35 @@ def extract_phone(text):
     return ""
 
 def extract_location(text):
-    """Extract location using patterns only - no hardcoded city lists"""
+    """Extract location - only return if explicitly labeled, otherwise empty"""
     lines = text.split('\n')
 
-    # Look for explicit location labels first (most reliable)
-    for line in lines[:25]:
+    # ONLY look for explicit location labels - this is the most reliable
+    for line in lines[:30]:
         line_clean = line.strip()
-        # Pattern: "Location: City" or "Address: City, State"
-        match = re.match(r'(?:location|address|based in|residing\s+in|residing\s+at)[:\s]+([A-Za-z][A-Za-z\s,]{3,30})', line_clean, re.I)
+        # Skip lines with technical content
+        if any(x in line_clean.lower() for x in ['experience', 'skills', 'project', 'http', '@']):
+            continue
+
+        # Pattern: "Location: City" or "Address: City, State" or "City: Mumbai"
+        match = re.match(r'(?:location|address|city|based in|residing)[:\s]+([A-Za-z][A-Za-z\s]{2,25})', line_clean, re.I)
         if match:
             loc = match.group(1).strip().split(',')[0].strip()
-            # Must have at least 3 chars and not be all caps (likely acronym)
-            if len(loc) >= 3 and not loc.isupper():
+            if len(loc) >= 3 and len(loc) <= 20:
                 return loc
 
-    # Look for "City, Country" pattern (Mumbai, India / New York, USA)
-    for line in lines[:20]:
+    # Look for "City, India" or "City, State" pattern ONLY on contact lines (first 10 lines)
+    for line in lines[:10]:
         line_clean = line.strip()
-        # Skip lines with email or urls
-        if '@' in line_clean or 'http' in line_clean.lower() or '|' in line_clean:
+        # Must be a short line (contact info) and not contain technical terms
+        if len(line_clean) > 60 or '@' in line_clean:
             continue
-        # Pattern: "City, Country" where country is 2-15 chars
-        match = re.search(r'\b([A-Z][a-z]{2,15})\s*,\s*([A-Z][a-zA-Z]{1,15})\b', line_clean)
+        # Pattern: "City, India" specifically
+        match = re.search(r'\b([A-Z][a-z]{3,15})\s*,\s*India\b', line_clean, re.I)
         if match:
-            city = match.group(1)
-            if len(city) >= 3:
-                return city
+            return match.group(1)
 
+    # No location found - return empty (frontend will show appropriate message)
     return ""
 
 def extract_current_role(text, lines):
@@ -382,15 +384,17 @@ Extract these fields ACCURATELY:
 1. name: Full name (usually at very top)
 2. email: Email address
 3. phone: Phone number
-4. location: City name from address or contact section (NOT from email domain)
-5. experience_years: Calculate from work experience dates. Example: if jobs are Jul 2024-Present and Jan 2022-Jun 2024, total is ~4 years. Return as NUMBER.
-6. current_role: The JOB TITLE of current/most recent position (like "AI Engineer", "Financial Analyst", "HR Manager")
+4. location: City name ONLY if explicitly mentioned (like "Location: Mumbai" or "Address: Delhi"). If no location found, return empty string ""
+5. experience_years: Calculate from work experience dates. Return as NUMBER.
+6. current_role: The JOB TITLE of current/most recent position (like "AI Engineer", "Financial Analyst")
 7. education: Highest degree (B.Tech, MBA, etc.)
-8. skills: Array of 10-15 actual skills mentioned (from Skills section or throughout resume)
+8. skills: Array of 10-15 actual skills from the Skills/Technical Skills section. Include ALL skills listed there.
 9. matched_skills: Which candidate skills match the job requirements
 10. missing_skills: Key job requirements candidate doesn't have
 11. score: Match score 0-100 based on how well candidate fits the job
 12. recommendation: "Best" (80+), "Good" (65-79), "Average" (50-64), "Poor" (<50)
+
+IMPORTANT: For skills, extract ALL skills from the skills section, not just a few.
 
 Return ONLY valid JSON, no explanation:"""
 
@@ -453,6 +457,13 @@ def process_resume(resume_text, job_text, frontend_data):
             score = 50
         score = max(0, min(100, int(score)))
 
+        # Get all skills and matched skills
+        all_skills = ai_result.get('skills', [])
+        matched_skills = ai_result.get('matched_skills', [])
+
+        # Use all skills for display, matched for highlighting
+        display_skills = all_skills[:15] if all_skills else matched_skills[:10]
+
         return {
             "name": ai_result.get('name') or frontend_data.get('name', 'Unknown'),
             "email": ai_result.get('email') or frontend_data.get('email', ''),
@@ -462,8 +473,8 @@ def process_resume(resume_text, job_text, frontend_data):
             "currentRole": ai_result.get('current_role') or frontend_data.get('currentRole', ''),
             "currentCompany": ai_result.get('current_company', ''),
             "education": ai_result.get('education', ''),
-            "skills": ai_result.get('matched_skills', []) or ai_result.get('skills', [])[:10],
-            "coveredSkills": ai_result.get('matched_skills', []),
+            "skills": display_skills,
+            "coveredSkills": matched_skills,
             "missingSkills": ai_result.get('missing_skills', []),
             "score": score,
             "recommendation": ai_result.get('recommendation', 'Average'),
@@ -475,6 +486,10 @@ def process_resume(resume_text, job_text, frontend_data):
     extracted = extract_all_regex(resume_text)
     score_data = calculate_score(extracted, job_text)
 
+    # Get all extracted skills
+    all_skills = extracted.get('skills', [])
+    matched_skills = score_data.get('matched_skills', [])
+
     return {
         "name": extracted.get('name') or frontend_data.get('name', 'Unknown'),
         "email": extracted.get('email') or frontend_data.get('email', ''),
@@ -484,8 +499,8 @@ def process_resume(resume_text, job_text, frontend_data):
         "currentRole": extracted.get('current_role') or frontend_data.get('currentRole', ''),
         "currentCompany": "",
         "education": extracted.get('education', ''),
-        "skills": score_data.get('matched_skills', []) or extracted.get('skills', [])[:10],
-        "coveredSkills": score_data.get('matched_skills', []),
+        "skills": all_skills[:15] if all_skills else matched_skills[:10],
+        "coveredSkills": matched_skills,
         "missingSkills": [],
         "score": score_data.get('score', 40),
         "recommendation": score_data.get('recommendation', 'Poor'),

@@ -54,15 +54,22 @@ def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 # AI API Configuration - supports Groq (free), Grok (xAI), or OpenAI
+# Available Groq models (2024): llama-3.1-8b-instant, llama-3.1-70b-versatile, mixtral-8x7b-32768
+GROQ_MODELS = ['llama-3.1-8b-instant', 'llama-3.1-70b-versatile', 'mixtral-8x7b-32768']
+CURRENT_MODEL_INDEX = 0
+
 def get_ai_config():
-    # Try Groq first (FREE) - using compound for best accuracy
+    global CURRENT_MODEL_INDEX
+
+    # Try Groq first (FREE)
     groq_key = os.environ.get('GROQ_API_KEY', '')
     if groq_key:
+        model = GROQ_MODELS[CURRENT_MODEL_INDEX % len(GROQ_MODELS)]
         return {
             'provider': 'groq',
             'api_key': groq_key,
             'base_url': 'https://api.groq.com/openai/v1/chat/completions',
-            'model': 'compound-beta'  # Groq's most capable model
+            'model': model
         }
 
     # Try Grok (xAI)
@@ -87,10 +94,19 @@ def get_ai_config():
 
     return None
 
-def call_ai_api(messages, max_tokens=800):
+def try_next_model():
+    """Switch to next model if current one fails"""
+    global CURRENT_MODEL_INDEX
+    CURRENT_MODEL_INDEX = (CURRENT_MODEL_INDEX + 1) % len(GROQ_MODELS)
+    print(f"Switching to model: {GROQ_MODELS[CURRENT_MODEL_INDEX]}")
+
+def call_ai_api(messages, max_tokens=800, retry_count=0):
     config = get_ai_config()
     if not config:
+        print("AI API: No configuration found - no API keys set")
         return None
+
+    print(f"AI API: Calling {config['provider']} with model {config['model']}")
 
     try:
         data = json.dumps({
@@ -111,14 +127,31 @@ def call_ai_api(messages, max_tokens=800):
 
         with urllib.request.urlopen(req, timeout=60) as response:
             result = json.loads(response.read().decode('utf-8'))
-            return result['choices'][0]['message']['content'].strip()
+            content = result['choices'][0]['message']['content'].strip()
+            print(f"AI API: Success - received {len(content)} chars")
+            return content
 
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode('utf-8') if e.fp else 'No details'
+        print(f"AI API HTTP Error ({config['provider']}): {e.code} - {e.reason}")
+        print(f"AI API Error details: {error_body[:500]}")
+
+        # If model not found or rate limited, try next model
+        if e.code in [404, 429, 503] and config['provider'] == 'groq' and retry_count < len(GROQ_MODELS):
+            try_next_model()
+            print(f"Retrying with next model (attempt {retry_count + 1})")
+            return call_ai_api(messages, max_tokens, retry_count + 1)
+        return None
+    except urllib.error.URLError as e:
+        print(f"AI API URL Error ({config['provider']}): {e.reason}")
+        return None
     except Exception as e:
-        print(f"AI API error ({config['provider']}): {e}")
+        print(f"AI API Error ({config['provider']}): {type(e).__name__}: {e}")
         return None
 
 def extract_resume_with_ai(resume_text, job_description=""):
     """Use AI to extract structured data from resume - handles any format"""
+    print(f"extract_resume_with_ai: Starting extraction, text length={len(resume_text)}")
 
     # Clean the resume text but preserve some structure
     clean_text = resume_text.replace('\x00', '')
@@ -476,6 +509,7 @@ def format_skill(skill):
 
 def analyze_match_with_ai(resume_data, job_text):
     """Use AI to match resume skills against job description with accurate scoring"""
+    print(f"analyze_match_with_ai: Matching candidate {resume_data.get('name')} with {len(resume_data.get('skills', []))} skills")
 
     skills_str = ', '.join(resume_data.get('skills', [])[:25])
 
@@ -526,11 +560,15 @@ Return ONLY valid JSON (no markdown, no explanation):
             if content.startswith('```'):
                 content = re.sub(r'^```json?\n?', '', content)
                 content = re.sub(r'\n?```$', '', content)
-            return json.loads(content)
-        except:
-            pass
+            result = json.loads(content)
+            print(f"analyze_match_with_ai: AI returned score={result.get('score')}, recommendation={result.get('recommendation')}")
+            return result
+        except Exception as e:
+            print(f"analyze_match_with_ai: JSON parsing failed: {e}")
+            print(f"Response was: {response[:300] if response else 'None'}")
 
     # Fallback: basic matching without AI
+    print("analyze_match_with_ai: Falling back to basic matching")
     return match_skills_basic(resume_data, job_text)
 
 def match_skills_basic(resume_data, job_text):
@@ -579,44 +617,41 @@ Return ONLY valid JSON:
             except:
                 pass
 
-    # Fallback: Simple text-based matching (no hardcoded lists)
+    # Fallback: Use extracted data for basic matching - no hardcoded lists
+    print("AI scoring failed - using basic skill matching")
     job_lower = job_text.lower()
-    resume_skills = [s.lower() for s in resume_data.get('skills', [])]
-
-    # Extract skills from job description using AI
-    job_skills = extract_skills_from_text(job_text)
+    resume_skills = resume_data.get('skills', [])
 
     matched = []
     missing = []
 
-    for skill in job_skills:
+    # Simple text matching - check if each resume skill appears in job description
+    for skill in resume_skills:
         skill_lower = skill.lower()
-        found = any(skill_lower in rs or rs in skill_lower for rs in resume_skills)
-        if found:
+        if skill_lower in job_lower or any(word in job_lower for word in skill_lower.split() if len(word) > 3):
             matched.append(skill)
-        else:
-            missing.append(skill)
 
-    # Calculate score based on matches
-    if len(job_skills) > 0:
-        skill_score = int((len(matched) / len(job_skills)) * 60)
-    else:
-        skill_score = 40  # Default when no job skills extracted
-
-    # Experience contribution
+    # Calculate score dynamically based on data available
+    skill_count = len(resume_skills)
+    matched_count = len(matched)
     exp = resume_data.get('experience_years', 0)
-    exp_score = min(25, exp * 4) if exp > 0 else 5
 
-    # Role match contribution
-    role_score = 10
-    current_role = resume_data.get('current_role', '').lower()
-    if current_role and len(current_role) > 3:
-        # Check if any word from role appears in job
-        role_words = [w for w in current_role.split() if len(w) > 3]
-        if any(w in job_lower for w in role_words):
-            role_score = 20
+    # Dynamic scoring based on available data
+    if skill_count > 0:
+        match_ratio = matched_count / skill_count
+        base_score = int(match_ratio * 60) + 20  # 20-80 range based on skill match
+    else:
+        base_score = 30  # Low score when no skills extracted
 
-    total_score = min(95, max(40, skill_score + exp_score + role_score))
+    # Adjust for experience
+    if exp >= 5:
+        base_score += 15
+    elif exp >= 2:
+        base_score += 10
+    elif exp > 0:
+        base_score += 5
+
+    total_score = min(95, max(20, base_score))
 
     if total_score >= 80:
         recommendation = "Best"
@@ -626,6 +661,8 @@ Return ONLY valid JSON:
         recommendation = "Average"
     else:
         recommendation = "Poor"
+
+    print(f"Basic scoring: matched={matched_count}/{skill_count}, exp={exp}, score={total_score}")
 
     return {
         "score": total_score,
@@ -766,6 +803,51 @@ def analyze_resumes(job_text, candidates):
 
     ranking.sort(key=lambda x: x["score"], reverse=True)
     return ranking
+
+@app.route('/api/test-ai', methods=['GET', 'OPTIONS'])
+def test_ai():
+    """Test endpoint to verify AI API is working"""
+    if request.method == 'OPTIONS':
+        response = make_response()
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return response
+
+    config = get_ai_config()
+    if not config:
+        response = jsonify({
+            "success": False,
+            "error": "No AI API key configured",
+            "hint": "Set GROQ_API_KEY in Vercel environment variables"
+        })
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return response
+
+    # Test with a simple prompt
+    test_response = call_ai_api([
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "Reply with exactly: AI_TEST_OK"}
+    ], max_tokens=20)
+
+    if test_response and 'AI_TEST_OK' in test_response:
+        response = jsonify({
+            "success": True,
+            "provider": config['provider'],
+            "model": config['model'],
+            "message": "AI API is working correctly"
+        })
+    else:
+        response = jsonify({
+            "success": False,
+            "provider": config['provider'],
+            "model": config['model'],
+            "response": test_response,
+            "error": "AI API responded but not as expected"
+        })
+
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    return response
 
 @app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'OPTIONS'])
 @app.route('/<path:path>', methods=['GET', 'POST', 'OPTIONS'])

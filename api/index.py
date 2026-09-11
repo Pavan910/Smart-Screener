@@ -142,55 +142,10 @@ def extract_phone(text):
         return match.group(0)
     return ""
 
-def extract_location(text):
-    """Extract location - ONLY from contact/header section (first 5-8 lines), NOT from education"""
-    lines = text.split('\n')
-
-    # Keywords that indicate we're NOT in contact section
-    skip_keywords = ['education', 'bachelor', 'master', 'university', 'college', 'degree',
-                     'experience', 'skills', 'project', 'http', '@', 'certification',
-                     'b.tech', 'btech', 'm.tech', 'mtech', 'bca', 'mca', 'mba', 'phd']
-
-    # ONLY look in first 8 lines (contact/header area) for explicit location labels
-    for line in lines[:8]:
-        line_clean = line.strip()
-        line_lower = line_clean.lower()
-
-        # Skip lines that look like education or other sections
-        if any(kw in line_lower for kw in skip_keywords):
-            continue
-
-        # Skip empty or very long lines
-        if not line_clean or len(line_clean) > 80:
-            continue
-
-        # Pattern: "Location: City" or "Address: City, State" or "Based in: Mumbai"
-        match = re.match(r'(?:location|address|city|based in|residing|current\s+location)[:\s]+([A-Za-z][A-Za-z\s]{2,25})', line_clean, re.I)
-        if match:
-            loc = match.group(1).strip().split(',')[0].strip()
-            if len(loc) >= 3 and len(loc) <= 20:
-                return loc
-
-    # Look for "City, India" pattern ONLY in first 5 lines (true header only)
-    for line in lines[:5]:
-        line_clean = line.strip()
-        line_lower = line_clean.lower()
-
-        # Skip lines with education keywords, emails, or other sections
-        if any(kw in line_lower for kw in skip_keywords):
-            continue
-
-        # Must be a short line (contact info)
-        if len(line_clean) > 60:
-            continue
-
-        # Pattern: "City, India" specifically
-        match = re.search(r'\b([A-Z][a-z]{3,15})\s*,\s*India\b', line_clean, re.I)
-        if match:
-            return match.group(1)
-
-    # No location found in contact section - return empty
-    # This is better than showing old/wrong location from education
+def extract_location(_text):
+    """Let AI handle location extraction - return empty for regex fallback"""
+    # AI will intelligently determine current location vs education location
+    # No hardcoded logic here
     return ""
 
 def extract_current_role(text, lines):
@@ -493,7 +448,7 @@ def process_resume(resume_text, job_text, frontend_data):
             "name": ai_result.get('name') or frontend_data.get('name', 'Unknown'),
             "email": ai_result.get('email') or frontend_data.get('email', ''),
             "phone": ai_result.get('phone') or frontend_data.get('phone', ''),
-            "location": ai_result.get('location') or frontend_data.get('location', ''),
+            "location": ai_result.get('location', ''),  # AI decides location - no fallback
             "experience": ai_result.get('experience_years', 0),
             "currentRole": ai_result.get('current_role') or frontend_data.get('currentRole', ''),
             "currentCompany": ai_result.get('current_company', ''),
@@ -519,7 +474,7 @@ def process_resume(resume_text, job_text, frontend_data):
         "name": extracted.get('name') or frontend_data.get('name', 'Unknown'),
         "email": extracted.get('email') or frontend_data.get('email', ''),
         "phone": extracted.get('phone') or frontend_data.get('phone', ''),
-        "location": extracted.get('location') or frontend_data.get('location', ''),
+        "location": extracted.get('location', ''),  # No fallback - empty if not found
         "experience": extracted.get('experience_years', 0),
         "currentRole": extracted.get('current_role') or frontend_data.get('currentRole', ''),
         "currentCompany": "",

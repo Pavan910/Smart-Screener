@@ -429,58 +429,9 @@ function extractContactInfo(text) {
 }
 
 // Extract location from resume text
-function extractLocation(text) {
-  const normalizedText = text.replace(/\s+/g, ' ');
-  const textLower = normalizedText.toLowerCase();
-
-  // Extended list of Indian cities
-  const indianCities = [
-    'Mumbai', 'Delhi', 'New Delhi', 'Bangalore', 'Bengaluru', 'Hyderabad', 'Chennai',
-    'Kolkata', 'Pune', 'Ahmedabad', 'Jaipur', 'Noida', 'Gurgaon', 'Gurugram',
-    'Vadodara', 'Baroda', 'Surat', 'Lucknow', 'Chandigarh', 'Indore', 'Bhopal',
-    'Coimbatore', 'Kochi', 'Cochin', 'Trivandrum', 'Thiruvananthapuram', 'Mysore',
-    'Mysuru', 'Nagpur', 'Patna', 'Ranchi', 'Bhubaneswar', 'Visakhapatnam', 'Vizag',
-    'Thane', 'Navi Mumbai', 'Faridabad', 'Ghaziabad', 'Rajkot', 'Nashik', 'Aurangabad',
-    'Ludhiana', 'Amritsar', 'Agra', 'Varanasi', 'Kanpur', 'Dehradun', 'Raipur',
-    'Jodhpur', 'Udaipur', 'Guwahati', 'Mangalore', 'Mangaluru', 'Hubli', 'Belgaum',
-    'Salem', 'Madurai', 'Trichy', 'Tiruchirappalli', 'Vijayawada', 'Warangal'
-  ];
-
-  // First check for labeled locations
-  const labeledPatterns = [
-    /(?:Location|Address|City|Based in|residing at|located at|current location)\s*[:\-]\s*([A-Za-z\s,]+)/i,
-    /(?:Location|Address)\s*[:\-]?\s*([A-Za-z]+(?:,?\s*[A-Za-z]+)?)/i
-  ];
-
-  for (const pattern of labeledPatterns) {
-    const match = normalizedText.match(pattern);
-    if (match && match[1]) {
-      const loc = match[1].trim().split(',')[0].trim();
-      if (loc.length > 2 && loc.length < 30) {
-        return loc;
-      }
-    }
-  }
-
-  // Check for Indian cities
-  for (const city of indianCities) {
-    if (textLower.includes(city.toLowerCase())) {
-      return city;
-    }
-  }
-
-  // Check for US cities with state codes
-  const usPattern = /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),?\s*(CA|NY|TX|FL|WA|IL|PA|OH|GA|NC|MI|NJ|VA|AZ|MA|TN|IN|MO|MD|WI|CO|MN|SC|AL|LA|KY|OR|OK|CT|UT|IA|NV|AR|MS|KS|NM|NE|WV|ID|HI|NH|ME|MT|RI|DE|SD|ND|AK|VT|WY|DC)/;
-  const usMatch = normalizedText.match(usPattern);
-  if (usMatch) {
-    return `${usMatch[1]}, ${usMatch[2]}`;
-  }
-
-  // Check for Remote/Hybrid
-  if (textLower.includes('remote') || textLower.includes('work from home')) {
-    return 'Remote';
-  }
-
+function extractLocation() {
+  // Let AI handle location extraction - frontend doesn't extract location
+  // The backend AI will intelligently determine current location vs education location
   return '';
 }
 

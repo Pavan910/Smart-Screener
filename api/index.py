@@ -55,14 +55,14 @@ def hash_password(password):
 
 # AI API Configuration - supports Groq (free), Grok (xAI), or OpenAI
 def get_ai_config():
-    # Try Groq first (FREE) - using mixtral for reliable performance
+    # Try Groq first (FREE) - using llama-3.1-70b for best accuracy
     groq_key = os.environ.get('GROQ_API_KEY', '')
     if groq_key:
         return {
             'provider': 'groq',
             'api_key': groq_key,
             'base_url': 'https://api.groq.com/openai/v1/chat/completions',
-            'model': 'mixtral-8x7b-32768'
+            'model': 'llama-3.1-70b-versatile'
         }
 
     # Try Grok (xAI)
@@ -118,55 +118,59 @@ def call_ai_api(messages, max_tokens=800):
         return None
 
 def extract_resume_with_ai(resume_text, job_description=""):
-    """Use AI to extract structured data from resume with high accuracy"""
+    """Use AI to extract structured data from resume - handles any format"""
 
-    # Clean the resume text - handle PDF extraction issues
+    # Clean the resume text
     clean_text = resume_text.replace('\x00', '').strip()
-    # Normalize whitespace
     clean_text = re.sub(r'\s+', ' ', clean_text)
-    # Try to preserve line breaks for structure
-    resume_lines = resume_text.split('\n')
-    first_lines = '\n'.join([l.strip() for l in resume_lines[:20] if l.strip()])
 
-    jd_context = f"\nJOB DESCRIPTION (use this to identify relevant skills):\n{job_description[:800]}\n" if job_description else ""
+    # Add job context if available
+    jd_hint = ""
+    if job_description:
+        jd_hint = f"\n\nNOTE: When extracting skills, pay special attention to skills relevant to this job: {job_description[:500]}"
 
-    prompt = f"""Parse this resume and extract candidate information. The text may have formatting issues from PDF extraction.
+    prompt = f"""You are an expert HR professional analyzing a resume. Extract the following information accurately.
 
-FIRST 20 LINES (check here for NAME):
-{first_lines}
+RESUME TEXT:
+{clean_text[:6000]}{jd_hint}
 
-FULL RESUME TEXT:
-{clean_text[:4500]}
-{jd_context}
-EXTRACTION INSTRUCTIONS:
-1. NAME: The person's full name (first + last). Usually the FIRST prominent text. Look for 2-3 capitalized words at the top that form a name. NEVER return "Unknown" - find the actual name.
+INSTRUCTIONS - Extract these fields from the resume:
 
-2. EMAIL: Email address from the resume
+1. **name**: The candidate's full name. Look at the very beginning of the resume - it's usually the first line or prominently displayed. Format: "First Last" or "First Middle Last".
 
-3. PHONE: Phone number with country code
+2. **email**: Email address (format: something@domain.com)
 
-4. LOCATION: City where the person is located
+3. **phone**: Phone number including country code if present
 
-5. EXPERIENCE: Total years of work experience (as number)
+4. **location**: Current city/location. Look near the contact information at the top, or in the address section. Just the city name is fine.
 
-6. CURRENT ROLE: Their CURRENT or MOST RECENT job title. Must be a proper title like:
-   - "HR Executive", "Software Engineer", "Data Analyst", "Recruitment Specialist"
-   - Look in Work Experience section for the first/most recent position
-   - Extract the TITLE, not the job description
+5. **experience_years**: Total years of professional work experience. Calculate from work history dates, or find explicit mentions like "5+ years experience". Return as integer.
 
-7. CURRENT COMPANY: Name of current/most recent employer
+6. **current_role**: The job title from their CURRENT or MOST RECENT position. This is CRITICAL - look in:
+   - "Work Experience" section - the FIRST job listed is usually the current/most recent
+   - "Professional Experience" section
+   - "Employment History" section
+   Examples of job titles: "HR Executive", "Software Developer", "Data Analyst", "Marketing Manager", "Recruitment Specialist", "Business Analyst"
+   DO NOT return responsibilities or descriptions - only the job TITLE.
 
-8. EDUCATION: Highest degree (e.g., B.Tech, MBA, B.Com)
+7. **current_company**: Name of the company where they currently work or most recently worked
 
-9. SKILLS: List ALL skills found in the resume - technical, soft skills, tools, software, certifications. Extract 8-15 skills minimum.
+8. **education**: Highest educational qualification (e.g., "B.Tech", "MBA", "B.Com", "M.Sc")
 
-Return ONLY this JSON (no other text):
-{{"name":"","email":"","phone":"","location":"","experience_years":0,"current_role":"","current_company":"","education":"","skills":[]}}"""
+9. **skills**: List of ALL skills mentioned anywhere in the resume. Include:
+   - Technical skills (programming, software, tools)
+   - Domain skills (HR, Finance, Marketing, Sales)
+   - Soft skills (Communication, Leadership, Team Management)
+   - Tools & Software (Excel, SAP, Salesforce, PowerPoint)
+   Extract at least 10-15 skills if available.
+
+RESPOND WITH ONLY THIS JSON (no markdown, no explanation):
+{{"name":"Full Name","email":"email@example.com","phone":"+91XXXXXXXXXX","location":"City","experience_years":5,"current_role":"Job Title","current_company":"Company Name","education":"Degree","skills":["Skill1","Skill2","Skill3"]}}"""
 
     response = call_ai_api([
-        {"role": "system", "content": "Extract resume data accurately. Return valid JSON only. For name, find the actual person's name at the top of the resume. For current_role, extract the job title not description. For skills, list actual skills not action verbs."},
+        {"role": "system", "content": "You are a precise resume parser. Extract information exactly as requested. Always return valid JSON. For current_role, extract only the job title (like 'HR Executive' or 'Senior Developer'), never job descriptions. Find the actual person's name - never return 'Unknown'."},
         {"role": "user", "content": prompt}
-    ], max_tokens=1200)
+    ], max_tokens=1500)
 
     if response:
         try:

@@ -642,13 +642,43 @@ def analyze_resumes(job_text, candidates):
         # Extract with AI
         extracted = extract_resume_with_ai(resume_text, job_text)
 
-        # Merge frontend data with AI extraction - prefer AI data when available
-        name = validate_and_clean(extracted.get("name") or c.get("name") or "Unknown")
+        # Merge frontend data with AI extraction
+        # For name: prefer frontend extraction if AI returns empty/Unknown
+        ai_name = extracted.get("name", "")
+        frontend_name = c.get("name", "")
+        if ai_name and ai_name != "Unknown" and len(ai_name) > 2:
+            name = validate_and_clean(ai_name)
+        elif frontend_name and frontend_name != "Unknown" and len(frontend_name) > 2:
+            name = validate_and_clean(frontend_name)
+        else:
+            # Last resort: try to find name from resume text
+            name = "Unknown"
+            resume_lines = resume_text.split('\n')
+            for line in resume_lines[:15]:
+                line = line.strip()
+                if line and 3 < len(line) < 40:
+                    if not re.search(r'@|http|www\.|phone|email|resume|cv|profile|summary|objective|experience|education|skills|\d{5,}', line, re.I):
+                        words = line.split()
+                        if 2 <= len(words) <= 4 and all(w[0].isupper() for w in words if w):
+                            name = line
+                            break
+
+        # For other fields: prefer AI data, fall back to frontend
         email = validate_and_clean(extracted.get("email") or c.get("email"))
         phone = validate_and_clean(extracted.get("phone") or c.get("phone"))
         location = validate_and_clean(extracted.get("location") or c.get("location"))
         experience = validate_and_clean(extracted.get("experience_years") or c.get("experience") or 0, "number")
-        current_role = validate_and_clean(extracted.get("current_role") or c.get("currentRole"))
+
+        # For current role: prefer AI, then frontend, then try to extract
+        ai_role = extracted.get("current_role", "")
+        frontend_role = c.get("currentRole", "")
+        if ai_role and len(ai_role) > 2:
+            current_role = validate_and_clean(ai_role)
+        elif frontend_role and len(frontend_role) > 2:
+            current_role = validate_and_clean(frontend_role)
+        else:
+            current_role = ""
+
         current_company = validate_and_clean(extracted.get("current_company") or c.get("currentCompany"))
         education = validate_and_clean(extracted.get("education") or c.get("education"))
         skills = extracted.get("skills") or []

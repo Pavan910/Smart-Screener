@@ -703,8 +703,22 @@ function renderResultsTable(ranking) {
 
   sorted.forEach((item, index) => {
     const tr = document.createElement('tr');
-    const decision = item.score >= 85 ? 'Shortlist' : item.score >= 70 ? 'Review' : 'Pool';
-    const decisionClass = item.score >= 85 ? 'decision-shortlist' : item.score >= 70 ? 'decision-review' : 'decision-pool';
+    // Use backend recommendation or calculate based on score
+    let decision = item.recommendation || (item.score >= 80 ? 'Best' : item.score >= 65 ? 'Good' : item.score >= 50 ? 'Average' : 'Poor');
+    let decisionClass = 'decision-pool';
+    if (decision === 'Best' || item.score >= 80) {
+      decisionClass = 'decision-shortlist';
+      decision = 'Best';
+    } else if (decision === 'Good' || item.score >= 65) {
+      decisionClass = 'decision-review';
+      decision = 'Good';
+    } else if (decision === 'Average' || item.score >= 50) {
+      decisionClass = 'decision-average';
+      decision = 'Average';
+    } else {
+      decisionClass = 'decision-poor';
+      decision = 'Poor';
+    }
     const skills = Array.isArray(item.skills) ? item.skills.slice(0, 3).join(', ') :
                    (item.coveredSkills ? item.coveredSkills.slice(0, 3).join(', ') : '');
 

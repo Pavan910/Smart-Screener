@@ -143,35 +143,54 @@ def extract_phone(text):
     return ""
 
 def extract_location(text):
-    """Extract location - only return if explicitly labeled, otherwise empty"""
+    """Extract location - ONLY from contact/header section (first 5-8 lines), NOT from education"""
     lines = text.split('\n')
 
-    # ONLY look for explicit location labels - this is the most reliable
-    for line in lines[:30]:
+    # Keywords that indicate we're NOT in contact section
+    skip_keywords = ['education', 'bachelor', 'master', 'university', 'college', 'degree',
+                     'experience', 'skills', 'project', 'http', '@', 'certification',
+                     'b.tech', 'btech', 'm.tech', 'mtech', 'bca', 'mca', 'mba', 'phd']
+
+    # ONLY look in first 8 lines (contact/header area) for explicit location labels
+    for line in lines[:8]:
         line_clean = line.strip()
-        # Skip lines with technical content
-        if any(x in line_clean.lower() for x in ['experience', 'skills', 'project', 'http', '@']):
+        line_lower = line_clean.lower()
+
+        # Skip lines that look like education or other sections
+        if any(kw in line_lower for kw in skip_keywords):
             continue
 
-        # Pattern: "Location: City" or "Address: City, State" or "City: Mumbai"
-        match = re.match(r'(?:location|address|city|based in|residing)[:\s]+([A-Za-z][A-Za-z\s]{2,25})', line_clean, re.I)
+        # Skip empty or very long lines
+        if not line_clean or len(line_clean) > 80:
+            continue
+
+        # Pattern: "Location: City" or "Address: City, State" or "Based in: Mumbai"
+        match = re.match(r'(?:location|address|city|based in|residing|current\s+location)[:\s]+([A-Za-z][A-Za-z\s]{2,25})', line_clean, re.I)
         if match:
             loc = match.group(1).strip().split(',')[0].strip()
             if len(loc) >= 3 and len(loc) <= 20:
                 return loc
 
-    # Look for "City, India" or "City, State" pattern ONLY on contact lines (first 10 lines)
-    for line in lines[:10]:
+    # Look for "City, India" pattern ONLY in first 5 lines (true header only)
+    for line in lines[:5]:
         line_clean = line.strip()
-        # Must be a short line (contact info) and not contain technical terms
-        if len(line_clean) > 60 or '@' in line_clean:
+        line_lower = line_clean.lower()
+
+        # Skip lines with education keywords, emails, or other sections
+        if any(kw in line_lower for kw in skip_keywords):
             continue
+
+        # Must be a short line (contact info)
+        if len(line_clean) > 60:
+            continue
+
         # Pattern: "City, India" specifically
         match = re.search(r'\b([A-Z][a-z]{3,15})\s*,\s*India\b', line_clean, re.I)
         if match:
             return match.group(1)
 
-    # No location found - return empty (frontend will show appropriate message)
+    # No location found in contact section - return empty
+    # This is better than showing old/wrong location from education
     return ""
 
 def extract_current_role(text, lines):
@@ -384,7 +403,11 @@ Extract these fields ACCURATELY:
 1. name: Full name (usually at very top)
 2. email: Email address
 3. phone: Phone number
-4. location: City name ONLY if explicitly mentioned (like "Location: Mumbai" or "Address: Delhi"). If no location found, return empty string ""
+4. location: CURRENT location/address ONLY from the CONTACT SECTION at the top (first 5-8 lines).
+   - DO NOT extract location from education section (like university location)
+   - DO NOT extract city names from job experience locations
+   - ONLY use explicitly labeled current address like "Location: Mumbai" or "Address: Delhi"
+   - If no current address found in contact section, return empty string ""
 5. experience_years: Calculate from work experience dates. Return as NUMBER.
 6. current_role: The JOB TITLE of current/most recent position (like "AI Engineer", "Financial Analyst")
 7. education: Highest degree (B.Tech, MBA, etc.)
@@ -394,7 +417,9 @@ Extract these fields ACCURATELY:
 11. score: Match score 0-100 based on how well candidate fits the job
 12. recommendation: "Best" (80+), "Good" (65-79), "Average" (50-64), "Poor" (<50)
 
-IMPORTANT: For skills, extract ALL skills from the skills section, not just a few.
+IMPORTANT:
+- For skills, extract ALL skills from the skills section, not just a few.
+- For location, ONLY extract from contact/header section. Education institution locations are NOT current addresses.
 
 Return ONLY valid JSON, no explanation:"""
 

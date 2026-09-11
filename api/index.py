@@ -311,11 +311,11 @@ Return JSON with these exact fields:
 - name: candidate's full name
 - email: email address
 - phone: phone number
-- location: city
-- experience_years: total years of work experience (number)
+- location: most recent city can take from the resume latest location based on experience or address
+- experience_years: total years of work experience (calculated from all job dates or explicit mention)
 - current_role: current/most recent JOB TITLE only (like "Software Engineer", "HR Manager")
 - education: highest degree
-- skills: array of 10-15 technical skills from resume
+- skills: array of 10-15 skills from resume (look for skills section, technical skills, and keywords)
 - matched_skills: skills that match job requirements
 - missing_skills: job requirements candidate lacks
 - score: match score 0-100 (based on skills match, experience fit, role relevance)

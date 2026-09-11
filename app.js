@@ -875,9 +875,20 @@ async function runAnalysis(includeLibraryResumes = false) {
     for (const file of uploadFiles) {
       const text = await extractTextFromFile(file);
 
-      if (!text || text.trim().length === 0) {
-        console.warn(`Could not extract text from ${file.name}`);
-        continue;
+      // Get base64 PDF data for server-side extraction (better quality)
+      let pdfData = '';
+      if (file.name.toLowerCase().endsWith('.pdf')) {
+        try {
+          const arrayBuffer = await file.arrayBuffer();
+          const uint8Array = new Uint8Array(arrayBuffer);
+          let binary = '';
+          for (let i = 0; i < uint8Array.length; i++) {
+            binary += String.fromCharCode(uint8Array[i]);
+          }
+          pdfData = btoa(binary);
+        } catch (e) {
+          console.warn('Could not encode PDF to base64:', e);
+        }
       }
 
       const contactInfo = extractContactInfo(text);
@@ -887,6 +898,7 @@ async function runAnalysis(includeLibraryResumes = false) {
       allResumes.push({
         name: candidateName,
         resume: text,
+        pdfData: pdfData,  // Send base64 PDF for server-side extraction
         email: contactInfo.email,
         phone: contactInfo.phone,
         linkedin: contactInfo.linkedin,

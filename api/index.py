@@ -5,8 +5,46 @@ import hashlib
 import json
 import urllib.request
 import urllib.error
+import base64
 
 app = Flask(__name__)
+
+# Try to import PDF libraries
+try:
+    import fitz  # PyMuPDF - best for text extraction
+    PDF_LIBRARY = 'pymupdf'
+except ImportError:
+    try:
+        from PyPDF2 import PdfReader
+        PDF_LIBRARY = 'pypdf2'
+    except ImportError:
+        PDF_LIBRARY = None
+
+def extract_text_from_pdf_bytes(pdf_bytes):
+    """Extract text from PDF bytes using available library"""
+    if PDF_LIBRARY == 'pymupdf':
+        try:
+            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            text = ""
+            for page in doc:
+                text += page.get_text() + "\n"
+            doc.close()
+            return text.strip()
+        except Exception as e:
+            print(f"PyMuPDF extraction error: {e}")
+            return None
+    elif PDF_LIBRARY == 'pypdf2':
+        try:
+            import io
+            reader = PdfReader(io.BytesIO(pdf_bytes))
+            text = ""
+            for page in reader.pages:
+                text += page.extract_text() + "\n"
+            return text.strip()
+        except Exception as e:
+            print(f"PyPDF2 extraction error: {e}")
+            return None
+    return None
 
 # Authentication
 def get_password():
@@ -635,6 +673,18 @@ def analyze_resumes(job_text, candidates):
 
     for c in candidates:
         resume_text = c.get("resume", "")
+
+        # Try server-side PDF extraction if base64 PDF data is provided
+        pdf_base64 = c.get("pdfData", "")
+        if pdf_base64 and PDF_LIBRARY:
+            try:
+                pdf_bytes = base64.b64decode(pdf_base64)
+                extracted_text = extract_text_from_pdf_bytes(pdf_bytes)
+                if extracted_text and len(extracted_text) > 50:
+                    print(f"Server-side PDF extraction successful: {len(extracted_text)} chars")
+                    resume_text = extracted_text
+            except Exception as e:
+                print(f"Server PDF extraction failed: {e}")
 
         if not resume_text or len(resume_text.strip()) < 50:
             continue  # Skip empty or too short resumes

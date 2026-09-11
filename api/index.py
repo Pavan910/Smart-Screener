@@ -143,39 +143,32 @@ def extract_phone(text):
     return ""
 
 def extract_location(text):
-    """Extract location - avoid email domains and invalid patterns"""
+    """Extract location using patterns only - no hardcoded city lists"""
     lines = text.split('\n')
 
-    # Look for explicit location labels first
-    for line in lines[:20]:  # Location usually in first 20 lines
+    # Look for explicit location labels first (most reliable)
+    for line in lines[:25]:
         line_clean = line.strip()
-        # Pattern: "Location: City" or "Address: City"
-        match = re.match(r'(?:location|city|address|based in|residing)[:\s]+([A-Za-z][A-Za-z\s]{3,25})', line_clean, re.I)
+        # Pattern: "Location: City" or "Address: City, State"
+        match = re.match(r'(?:location|address|based in|residing\s+in|residing\s+at)[:\s]+([A-Za-z][A-Za-z\s,]{3,30})', line_clean, re.I)
         if match:
-            loc = match.group(1).strip()
-            # Must be at least 4 chars and not look like email/url part
-            if len(loc) >= 4 and not re.match(r'^(com|org|net|in|co|edu|www|http|gmail|yahoo|outlook)$', loc, re.I):
-                return loc.split(',')[0].strip()
+            loc = match.group(1).strip().split(',')[0].strip()
+            # Must have at least 3 chars and not be all caps (likely acronym)
+            if len(loc) >= 3 and not loc.isupper():
+                return loc
 
-    # Look for "City, Country" or "City, State" pattern in header
-    for line in lines[:15]:
+    # Look for "City, Country" pattern (Mumbai, India / New York, USA)
+    for line in lines[:20]:
         line_clean = line.strip()
-        # Skip if line has email
-        if '@' in line_clean:
+        # Skip lines with email or urls
+        if '@' in line_clean or 'http' in line_clean.lower() or '|' in line_clean:
             continue
-        # Pattern: "City, India" or "City, State"
-        match = re.search(r'\b([A-Z][a-z]{3,15})\s*,\s*(?:India|[A-Z][a-z]{3,15})\b', line_clean)
+        # Pattern: "City, Country" where country is 2-15 chars
+        match = re.search(r'\b([A-Z][a-z]{2,15})\s*,\s*([A-Z][a-zA-Z]{1,15})\b', line_clean)
         if match:
-            return match.group(1)
-
-    # Look for standalone city-like word after contact info
-    for line in lines[:15]:
-        line_clean = line.strip()
-        if '@' in line_clean or 'http' in line_clean.lower():
-            continue
-        # Single word that looks like a city (capitalized, 4-15 chars)
-        if re.match(r'^[A-Z][a-z]{3,15}$', line_clean):
-            return line_clean
+            city = match.group(1)
+            if len(city) >= 3:
+                return city
 
     return ""
 
@@ -289,65 +282,75 @@ def extract_education(text):
     return ""
 
 def extract_skills(text, lines):
-    """Extract skills from resume - handles multiple formats"""
+    """Extract skills from resume - handles multiple formats including Category: skill1, skill2"""
     skills = []
     in_skills = False
-    skills_text = ""
+    skills_lines = []
 
     for line in lines:
         line_lower = line.lower().strip()
 
-        # Detect skills section (various formats)
-        if re.match(r'^(technical\s+skills?|skills?|key\s+skills?|core\s+competenc|areas?\s+of\s+expertise|proficienc)', line_lower):
+        # Detect skills section
+        if re.match(r'^(technical\s+skills?|skills?|key\s+skills?|core\s+competenc|areas?\s+of\s+expertise)', line_lower):
             in_skills = True
-            # Check if skills are on same line as header
-            after_colon = re.split(r'[:\-]', line, 1)
-            if len(after_colon) > 1 and after_colon[1].strip():
-                skills_text += " " + after_colon[1]
             continue
 
         # Exit on other sections
-        if re.match(r'^(professional|work\s+experience|employment|education|academic|projects|certifications|achievements|experience|summary|objective)', line_lower):
+        if re.match(r'^(professional\s+experience|work\s+experience|employment|education|projects|certifications|achievements|experience|summary|objective)', line_lower):
             if in_skills:
                 break
             continue
 
         if in_skills and line.strip():
-            skills_text += " " + line
+            skills_lines.append(line.strip())
 
-    # Also look for inline skills format like "Skills: Python, Java, SQL"
-    if not skills_text:
-        inline_match = re.search(r'(?:skills?|competencies|proficiency)[:\s]+([^\n]{10,200})', text, re.I)
-        if inline_match:
-            skills_text = inline_match.group(1)
-
-    if skills_text:
-        # Parse skills - handle various formats
-        # Split by common delimiters
-        items = re.split(r'[,;|•\n/]+', skills_text)
-        for item in items:
-            item = item.strip()
-            # Clean up leading bullets, dashes, etc.
-            item = re.sub(r'^[\-\*\s•]+', '', item)
-            # Remove trailing category indicators
-            item = re.sub(r'\s*[:\-]\s*$', '', item)
-
-            # Valid skill: 2-40 chars, not just numbers, not a sentence
-            if 2 <= len(item) <= 40 and not item.isdigit():
-                # Skip if it looks like a sentence (has too many words)
-                if len(item.split()) <= 5:
+    # Parse each line - handle "Category: skill1, skill2, skill3" format
+    for line in skills_lines:
+        # Check if line has "Category: values" format
+        if ':' in line:
+            # Split by colon and take the values part
+            parts = line.split(':', 1)
+            if len(parts) > 1:
+                values_part = parts[1].strip()
+                # Split values by comma
+                items = re.split(r'[,;]+', values_part)
+                for item in items:
+                    item = item.strip()
+                    if 2 <= len(item) <= 40:
+                        skills.append(item)
+        else:
+            # No colon - split by common delimiters
+            items = re.split(r'[,;|•]+', line)
+            for item in items:
+                item = item.strip()
+                item = re.sub(r'^[\-\*\s•]+', '', item)
+                if 2 <= len(item) <= 40:
                     skills.append(item)
 
-    # Deduplicate while preserving order
-    seen = set()
-    unique_skills = []
-    for s in skills:
-        s_lower = s.lower()
-        if s_lower not in seen:
-            seen.add(s_lower)
-            unique_skills.append(s)
+    # Also try inline format if no skills found
+    if not skills:
+        # Look for "Skills: Python, Java, SQL" anywhere
+        inline_match = re.search(r'(?:skills?|competencies)[:\s]+([^\n]{10,300})', text, re.I)
+        if inline_match:
+            items = re.split(r'[,;|•]+', inline_match.group(1))
+            for item in items:
+                item = item.strip()
+                if 2 <= len(item) <= 40:
+                    skills.append(item)
 
-    return unique_skills[:20]
+    # Clean up and deduplicate
+    cleaned = []
+    seen = set()
+    for s in skills:
+        s = s.strip()
+        s_lower = s.lower()
+
+        # Skip empty, too short, or duplicates
+        if len(s) >= 2 and s_lower not in seen and len(s.split()) <= 5:
+            seen.add(s_lower)
+            cleaned.append(s)
+
+    return cleaned[:20]
 
 def extract_all_regex(text):
     """Extract all fields using regex"""

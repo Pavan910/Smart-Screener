@@ -43,7 +43,7 @@ def get_ai_config():
             'provider': 'groq',
             'api_key': groq_key,
             'base_url': 'https://api.groq.com/openai/v1/chat/completions',
-            'model': 'llama-3.1-8b-instant'
+            'model': 'llama-3.3-70b-versatile'
         }
     openai_key = os.environ.get('OPENAI_API_KEY', '')
     if openai_key:
@@ -358,12 +358,7 @@ Extract these fields ACCURATELY:
 1. name: Full name (usually at very top)
 2. email: Email address
 3. phone: Phone number
-4. location: Extract the candidate's CURRENT city/location. Use your intelligence to determine:
-   - Look for location near the contact info (name, email, phone) at the top of resume
-   - Cities mentioned alongside university/college names are EDUCATION locations, NOT current address
-   - If someone studied at "XYZ University, Dehradun" that's where they studied, not where they live now
-   - Only return a location if you're confident it's their current residence/city
-   - If unsure or only education locations found, return empty string ""
+4. location: The candidate's current city. Look for city name in the contact/header area (near name, email, phone). If a city is ONLY mentioned with a university/college in education section, that's NOT their current location - return "". Example: "Baroda" in contact = current location. "Dehradun" only with university = not current, return "".
 5. experience_years: Calculate from work experience dates. Return as NUMBER.
 6. current_role: The JOB TITLE of current/most recent position (like "AI Engineer", "Financial Analyst")
 7. education: Highest degree (B.Tech, MBA, etc.)
@@ -373,9 +368,7 @@ Extract these fields ACCURATELY:
 11. score: Match score 0-100 based on how well candidate fits the job
 12. recommendation: "Best" (80+), "Good" (65-79), "Average" (50-64), "Poor" (<50)
 
-IMPORTANT:
-- For skills, extract ALL skills from the skills section, not just a few.
-- For location, use context to distinguish current address from education location. Be intelligent about this.
+IMPORTANT: Extract ALL skills from the skills section.
 
 Return ONLY valid JSON, no explanation:"""
 

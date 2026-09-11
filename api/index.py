@@ -143,17 +143,40 @@ def extract_phone(text):
     return ""
 
 def extract_location(text):
-    # Look for location patterns
-    patterns = [
-        r'(?:location|city|address|based in|residing)[:\s]+([A-Za-z][A-Za-z\s]{2,20})',
-        r'([A-Z][a-z]+(?:,\s*[A-Z][a-z]+)?)\s*(?:,\s*India|\|)',
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text, re.I)
+    """Extract location - avoid email domains and invalid patterns"""
+    lines = text.split('\n')
+
+    # Look for explicit location labels first
+    for line in lines[:20]:  # Location usually in first 20 lines
+        line_clean = line.strip()
+        # Pattern: "Location: City" or "Address: City"
+        match = re.match(r'(?:location|city|address|based in|residing)[:\s]+([A-Za-z][A-Za-z\s]{3,25})', line_clean, re.I)
         if match:
-            loc = match.group(1).strip().split(',')[0].strip()
-            if 2 < len(loc) < 25:
-                return loc
+            loc = match.group(1).strip()
+            # Must be at least 4 chars and not look like email/url part
+            if len(loc) >= 4 and not re.match(r'^(com|org|net|in|co|edu|www|http|gmail|yahoo|outlook)$', loc, re.I):
+                return loc.split(',')[0].strip()
+
+    # Look for "City, Country" or "City, State" pattern in header
+    for line in lines[:15]:
+        line_clean = line.strip()
+        # Skip if line has email
+        if '@' in line_clean:
+            continue
+        # Pattern: "City, India" or "City, State"
+        match = re.search(r'\b([A-Z][a-z]{3,15})\s*,\s*(?:India|[A-Z][a-z]{3,15})\b', line_clean)
+        if match:
+            return match.group(1)
+
+    # Look for standalone city-like word after contact info
+    for line in lines[:15]:
+        line_clean = line.strip()
+        if '@' in line_clean or 'http' in line_clean.lower():
+            continue
+        # Single word that looks like a city (capitalized, 4-15 chars)
+        if re.match(r'^[A-Z][a-z]{3,15}$', line_clean):
+            return line_clean
+
     return ""
 
 def extract_current_role(text, lines):
@@ -195,39 +218,63 @@ def extract_current_role(text, lines):
     return ""
 
 def extract_experience_years(text):
-    """Calculate years of experience from job dates"""
+    """Calculate years of experience from job dates in EXPERIENCE section only"""
+    lines = text.split('\n')
+    current_year = datetime.now().year
+
     # First check for explicit mention
     exp_match = re.search(r'(\d+)\+?\s*(?:years?|yrs?)[\s\-]*(?:of\s+)?(?:experience|exp)', text, re.I)
     if exp_match:
-        return min(int(exp_match.group(1)), 30)
+        years = int(exp_match.group(1))
+        if 0 < years <= 30:
+            return years
 
-    # Parse job dates
-    current_year = datetime.now().year
-    current_month = datetime.now().month
+    # Find the EXPERIENCE section only
+    exp_section = ""
+    in_exp = False
+    for line in lines:
+        line_lower = line.lower().strip()
+        # Start of experience section
+        if re.match(r'^(professional\s+experience|work\s+experience|employment\s+history|experience)$', line_lower):
+            in_exp = True
+            continue
+        # End on other major sections
+        if re.match(r'^(education|skills|technical\s+skills|projects|certifications|achievements|key\s+projects)', line_lower):
+            if in_exp:
+                break
+        if in_exp:
+            exp_section += line + "\n"
 
-    # Find all date ranges like "Jan 2020 - Present" or "2020 - 2022"
-    date_patterns = [
-        r'(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s*(\d{4})\s*[-–]\s*(?:Present|Current|Now|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s*(\d{4}))',
-        r'(\d{4})\s*[-–]\s*(?:Present|Current|(\d{4}))'
-    ]
+    if not exp_section:
+        exp_section = text  # Fallback to full text if no section found
 
-    total_months = 0
-    for pattern in date_patterns:
-        matches = re.findall(pattern, text, re.I)
-        for match in matches:
-            start_year = int(match[0])
-            if match[1] and match[1].isdigit():
-                end_year = int(match[1])
-            else:
-                end_year = current_year
+    # Find date ranges like "Sep 2025 - Present" or "2020 - 2022"
+    date_pattern = r'(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s*(\d{4})\s*[-–]\s*(?:Present|Current|Now|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s*(\d{4}))'
 
-            if 1990 <= start_year <= current_year and start_year <= end_year:
-                months = (end_year - start_year) * 12 + 6  # Approximate
-                total_months += months
+    matches = re.findall(date_pattern, exp_section, re.I)
 
-    if total_months > 0:
-        years = round(total_months / 12)
-        return min(years, 30)
+    if not matches:
+        return 0
+
+    # Calculate total experience (handle potential overlaps by taking min-max range)
+    start_years = []
+    end_years = []
+
+    for match in matches:
+        start_year = int(match[0])
+        if match[1] and match[1].isdigit():
+            end_year = int(match[1])
+        else:
+            end_year = current_year
+
+        if 1990 <= start_year <= current_year and start_year <= end_year <= current_year + 1:
+            start_years.append(start_year)
+            end_years.append(end_year)
+
+    if start_years and end_years:
+        # Total span from earliest start to latest end
+        total_years = max(end_years) - min(start_years)
+        return min(max(total_years, 1), 30)
 
     return 0
 
@@ -242,7 +289,7 @@ def extract_education(text):
     return ""
 
 def extract_skills(text, lines):
-    """Extract skills from technical skills section"""
+    """Extract skills from resume - handles multiple formats"""
     skills = []
     in_skills = False
     skills_text = ""
@@ -250,13 +297,17 @@ def extract_skills(text, lines):
     for line in lines:
         line_lower = line.lower().strip()
 
-        # Detect skills section
-        if re.match(r'^(technical\s+skills|skills|key\s+skills|core\s+competencies)', line_lower):
+        # Detect skills section (various formats)
+        if re.match(r'^(technical\s+skills?|skills?|key\s+skills?|core\s+competenc|areas?\s+of\s+expertise|proficienc)', line_lower):
             in_skills = True
+            # Check if skills are on same line as header
+            after_colon = re.split(r'[:\-]', line, 1)
+            if len(after_colon) > 1 and after_colon[1].strip():
+                skills_text += " " + after_colon[1]
             continue
 
         # Exit on other sections
-        if re.match(r'^(professional\s+experience|work\s+experience|education|projects|certifications|experience)', line_lower):
+        if re.match(r'^(professional|work\s+experience|employment|education|academic|projects|certifications|achievements|experience|summary|objective)', line_lower):
             if in_skills:
                 break
             continue
@@ -264,23 +315,39 @@ def extract_skills(text, lines):
         if in_skills and line.strip():
             skills_text += " " + line
 
-    if skills_text:
-        # Parse skills from text like "AI / LLM: LangChain, RAG, etc."
-        # First split by newlines and colons
-        parts = re.split(r'[\n:]+', skills_text)
-        for part in parts:
-            # Split by common delimiters
-            items = re.split(r'[,;|•]+', part)
-            for item in items:
-                item = item.strip()
-                # Clean up
-                item = re.sub(r'^[\-\*\s]+', '', item)
-                if 2 <= len(item) <= 40 and not item.isdigit():
-                    # Skip category labels
-                    if not re.match(r'^(AI|Languages|Machine Learning|Cloud|Tools|Soft Skills|Technical)', item):
-                        skills.append(item)
+    # Also look for inline skills format like "Skills: Python, Java, SQL"
+    if not skills_text:
+        inline_match = re.search(r'(?:skills?|competencies|proficiency)[:\s]+([^\n]{10,200})', text, re.I)
+        if inline_match:
+            skills_text = inline_match.group(1)
 
-    return skills[:20]
+    if skills_text:
+        # Parse skills - handle various formats
+        # Split by common delimiters
+        items = re.split(r'[,;|•\n/]+', skills_text)
+        for item in items:
+            item = item.strip()
+            # Clean up leading bullets, dashes, etc.
+            item = re.sub(r'^[\-\*\s•]+', '', item)
+            # Remove trailing category indicators
+            item = re.sub(r'\s*[:\-]\s*$', '', item)
+
+            # Valid skill: 2-40 chars, not just numbers, not a sentence
+            if 2 <= len(item) <= 40 and not item.isdigit():
+                # Skip if it looks like a sentence (has too many words)
+                if len(item.split()) <= 5:
+                    skills.append(item)
+
+    # Deduplicate while preserving order
+    seen = set()
+    unique_skills = []
+    for s in skills:
+        s_lower = s.lower()
+        if s_lower not in seen:
+            seen.add(s_lower)
+            unique_skills.append(s)
+
+    return unique_skills[:20]
 
 def extract_all_regex(text):
     """Extract all fields using regex"""
@@ -307,21 +374,22 @@ RESUME:
 JOB:
 {job_description[:1500]}
 
-Return JSON with these exact fields:
-- name: candidate's full name
-- email: email address
-- phone: phone number
-- location: most recent city can take from the resume latest location based on experience or address
-- experience_years: total years of work experience (calculated from all job dates or explicit mention)
-- current_role: current/most recent JOB TITLE only (like "Software Engineer", "HR Manager")
-- education: highest degree
-- skills: array of 10-15 skills from resume (look for skills section, technical skills, and keywords)
-- matched_skills: skills that match job requirements
-- missing_skills: job requirements candidate lacks
-- score: match score 0-100 (based on skills match, experience fit, role relevance)
-- recommendation: "Best" (80+), "Good" (65-79), "Average" (50-64), or "Poor" (below 50)
+Extract these fields ACCURATELY:
 
-JSON only, no other text:"""
+1. name: Full name (usually at very top)
+2. email: Email address
+3. phone: Phone number
+4. location: City name from address or contact section (NOT from email domain)
+5. experience_years: Calculate from work experience dates. Example: if jobs are Jul 2024-Present and Jan 2022-Jun 2024, total is ~4 years. Return as NUMBER.
+6. current_role: The JOB TITLE of current/most recent position (like "AI Engineer", "Financial Analyst", "HR Manager")
+7. education: Highest degree (B.Tech, MBA, etc.)
+8. skills: Array of 10-15 actual skills mentioned (from Skills section or throughout resume)
+9. matched_skills: Which candidate skills match the job requirements
+10. missing_skills: Key job requirements candidate doesn't have
+11. score: Match score 0-100 based on how well candidate fits the job
+12. recommendation: "Best" (80+), "Good" (65-79), "Average" (50-64), "Poor" (<50)
+
+Return ONLY valid JSON, no explanation:"""
 
     response = call_ai(prompt)
     return parse_ai_json(response)

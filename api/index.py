@@ -344,36 +344,51 @@ def extract_all_regex(text):
     }
 
 def analyze_with_ai(resume_text, job_description):
-    """Use AI to analyze resume"""
-    prompt = f"""Parse this resume and match against the job.
+    """Use AI to analyze ONE resume"""
+    prompt = f"""Analyze THIS SINGLE RESUME and match against the job description.
 
-RESUME:
-{resume_text[:5000]}
+=== RESUME START ===
+{resume_text[:4500]}
+=== RESUME END ===
 
-JOB:
-{job_description[:1500]}
+=== JOB DESCRIPTION ===
+{job_description[:1200]}
+=== JOB END ===
 
-Extract these fields ACCURATELY:
+Extract information from THIS resume only. Return JSON with these exact keys:
 
-1. name: Full name (usually at very top)
-2. email: Email address
-3. phone: Phone number
-4. location: The candidate's current city. Look for city name in the contact/header area (near name, email, phone). If a city is ONLY mentioned with a university/college in education section, that's NOT their current location - return "". Example: "Baroda" in contact = current location. "Dehradun" only with university = not current, return "".
-5. experience_years: Calculate from work experience dates. Return as NUMBER.
-6. current_role: The JOB TITLE of current/most recent position (like "AI Engineer", "Financial Analyst")
-7. education: Highest degree (B.Tech, MBA, etc.)
-8. skills: Array of 10-15 actual skills from the Skills/Technical Skills section. Include ALL skills listed there.
-9. matched_skills: Which candidate skills match the job requirements
-10. missing_skills: Key job requirements candidate doesn't have
-11. score: Match score 0-100 based on how well candidate fits the job
-12. recommendation: "Best" (80+), "Good" (65-79), "Average" (50-64), "Poor" (<50)
+{{
+  "name": "candidate's full name from top of resume",
+  "email": "email address",
+  "phone": "phone number",
+  "location": "current city from contact area only (NOT from education section)",
+  "experience_years": number of years calculated from work dates,
+  "current_role": "most recent job title",
+  "education": "highest degree like B.Tech, MBA",
+  "skills": ["skill1", "skill2", ...],
+  "matched_skills": ["skills that match job"],
+  "missing_skills": ["required skills candidate lacks"],
+  "score": number 0-100,
+  "recommendation": "Best/Good/Average/Poor"
+}}
 
-IMPORTANT: Extract ALL skills from the skills section.
+Rules:
+- name: First line that looks like a person's name
+- location: City near contact info (email/phone). If city only appears with university, return ""
+- experience_years: Count years from work experience dates, return as NUMBER not string
+- skills: List ALL skills from skills section
+- score: 80+ = Best, 65-79 = Good, 50-64 = Average, <50 = Poor
 
-Return ONLY valid JSON, no explanation:"""
+Return ONLY the JSON object:"""
 
     response = call_ai(prompt)
-    return parse_ai_json(response)
+    result = parse_ai_json(response)
+
+    # Log for debugging
+    if result:
+        print(f"AI extracted: {result.get('name', 'NO NAME')} | {result.get('email', 'NO EMAIL')}")
+
+    return result
 
 def calculate_score(resume_data, job_text):
     """Calculate match score"""

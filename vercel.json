@@ -20,12 +20,34 @@
   ],
   "routes": [
     {
+      "src": "/api/test-ai",
+      "dest": "/api/index.py"
+    },
+    {
       "src": "/api/(.*)",
       "dest": "/api/index.py"
     },
     {
-      "src": "/(.*)",
+      "src": "/api",
+      "dest": "/api/index.py"
+    },
+    {
+      "src": "/(.*\\.(html|css|js|ico|png|jpg|svg))$",
       "dest": "/$1"
+    },
+    {
+      "src": "/",
+      "dest": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS" },
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
+      ]
     }
   ]
 }

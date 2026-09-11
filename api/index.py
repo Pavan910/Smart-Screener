@@ -358,11 +358,12 @@ Extract these fields ACCURATELY:
 1. name: Full name (usually at very top)
 2. email: Email address
 3. phone: Phone number
-4. location: CURRENT location/address ONLY from the CONTACT SECTION at the top (first 5-8 lines).
-   - DO NOT extract location from education section (like university location)
-   - DO NOT extract city names from job experience locations
-   - ONLY use explicitly labeled current address like "Location: Mumbai" or "Address: Delhi"
-   - If no current address found in contact section, return empty string ""
+4. location: Extract the candidate's CURRENT city/location. Use your intelligence to determine:
+   - Look for location near the contact info (name, email, phone) at the top of resume
+   - Cities mentioned alongside university/college names are EDUCATION locations, NOT current address
+   - If someone studied at "XYZ University, Dehradun" that's where they studied, not where they live now
+   - Only return a location if you're confident it's their current residence/city
+   - If unsure or only education locations found, return empty string ""
 5. experience_years: Calculate from work experience dates. Return as NUMBER.
 6. current_role: The JOB TITLE of current/most recent position (like "AI Engineer", "Financial Analyst")
 7. education: Highest degree (B.Tech, MBA, etc.)
@@ -374,7 +375,7 @@ Extract these fields ACCURATELY:
 
 IMPORTANT:
 - For skills, extract ALL skills from the skills section, not just a few.
-- For location, ONLY extract from contact/header section. Education institution locations are NOT current addresses.
+- For location, use context to distinguish current address from education location. Be intelligent about this.
 
 Return ONLY valid JSON, no explanation:"""
 

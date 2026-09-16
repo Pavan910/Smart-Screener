@@ -148,6 +148,7 @@ def _call_gemini(
     Call Google Gemini API.
 
     Gemini uses a different request format than OpenAI-compatible APIs.
+    Supports both standard API keys (AIza...) and OAuth keys (AQ...).
     """
     try:
         # Build Gemini request body
@@ -173,16 +174,24 @@ def _call_gemini(
 
         data = json.dumps(request_body).encode('utf-8')
 
-        # Gemini uses API key as query parameter
-        url = f"{config['base_url']}?key={config['api_key']}"
+        api_key = config['api_key']
 
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={
+        # Determine authentication method based on key format
+        if api_key.startswith('AQ.'):
+            # OAuth/Auth key - use Bearer token in header
+            url = config['base_url']
+            headers = {
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {api_key}'
+            }
+        else:
+            # Standard API key - use query parameter
+            url = f"{config['base_url']}?key={api_key}"
+            headers = {
                 'Content-Type': 'application/json'
             }
-        )
+
+        req = urllib.request.Request(url, data=data, headers=headers)
 
         with urllib.request.urlopen(req, timeout=60) as resp:
             result = json.loads(resp.read().decode('utf-8'))

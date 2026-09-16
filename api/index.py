@@ -1,14 +1,16 @@
+"""
+Smart-Screener API v5.0
+Main Flask application - refactored to use modular architecture.
+
+This is the entry point for the Vercel serverless deployment.
+"""
+
 from flask import Flask, request, jsonify, make_response
-import re
 import os
 import hashlib
-import json
-import urllib.request
-import urllib.error
 import base64
-from datetime import datetime
-
-app = Flask(__name__)
+import time
+from typing import List, Dict, Any, Optional
 
 # PDF Library
 try:
@@ -17,621 +19,369 @@ try:
 except ImportError:
     PDF_LIBRARY = None
 
-def extract_text_from_pdf_bytes(pdf_bytes):
-    if PDF_LIBRARY == 'pymupdf':
-        try:
-            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-            text = ""
-            for page in doc:
-                text += page.get_text() + "\n"
-            doc.close()
-            return text.strip()
-        except Exception as e:
-            print(f"PDF error: {e}")
-    return None
+# Import our modules - handle both local and Vercel deployment
+try:
+    # Try relative imports first (when running as package)
+    from .models import AnalyzedCandidate, AnalysisMetadata
+    from .utils import get_ai_config, clean_text
+    from .jd_parser import parse_job_description
+    from .resume_parser import parse_resume, parse_resumes_batch
+    from .matching_engine import calculate_match, rank_candidates
+    from .report_generator import generate_report
+except ImportError:
+    # Fall back to absolute imports (for Vercel serverless)
+    from models import AnalyzedCandidate, AnalysisMetadata
+    from utils import get_ai_config, clean_text
+    from jd_parser import parse_job_description
+    from resume_parser import parse_resume, parse_resumes_batch
+    from matching_engine import calculate_match, rank_candidates
+    from report_generator import generate_report
 
-def get_password():
+app = Flask(__name__)
+
+
+# ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
+
+def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> Optional[str]:
+    """Extract text from PDF bytes using PyMuPDF."""
+    if PDF_LIBRARY != 'pymupdf':
+        return None
+
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        text = ""
+        for page in doc:
+            text += page.get_text() + "\n"
+        doc.close()
+        return text.strip() if text else None
+    except Exception as e:
+        print(f"[PDF] Extraction error: {e}")
+        return None
+
+
+def get_password() -> str:
+    """Get app password from environment."""
     return os.environ.get('APP_PASSWORD', '')
 
-def hash_password(password):
+
+def hash_password(password: str) -> str:
+    """Hash password for session token."""
     return hashlib.sha256(password.encode()).hexdigest()
 
-def get_ai_config():
-    groq_key = os.environ.get('GROQ_API_KEY', '')
-    if groq_key:
-        return {
-            'provider': 'groq',
-            'api_key': groq_key,
-            'base_url': 'https://api.groq.com/openai/v1/chat/completions',
-            'model': 'llama-3.3-70b-versatile'
-        }
-    openai_key = os.environ.get('OPENAI_API_KEY', '')
-    if openai_key:
-        return {
-            'provider': 'openai',
-            'api_key': openai_key,
-            'base_url': 'https://api.openai.com/v1/chat/completions',
-            'model': 'gpt-3.5-turbo'
-        }
-    return None
 
-def call_ai(prompt, max_tokens=1500):
-    config = get_ai_config()
-    if not config:
-        return None
-
-    try:
-        data = json.dumps({
-            "model": config['model'],
-            "messages": [
-                {"role": "system", "content": "You are a resume parser. Extract information accurately. Return only valid JSON."},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.1,
-            "max_tokens": max_tokens
-        }).encode('utf-8')
-
-        req = urllib.request.Request(
-            config['base_url'],
-            data=data,
-            headers={
-                'Content-Type': 'application/json',
-                'Authorization': f'Bearer {config["api_key"]}'
-            }
-        )
-
-        with urllib.request.urlopen(req, timeout=25) as resp:
-            result = json.loads(resp.read().decode('utf-8'))
-            content = result['choices'][0]['message']['content'].strip()
-            print(f"AI OK: {len(content)} chars")
-            return content
-    except Exception as e:
-        print(f"AI Error: {e}")
-        return None
-
-def parse_ai_json(response):
-    if not response:
-        return None
-    try:
-        # Clean markdown
-        content = re.sub(r'^```(?:json)?\s*', '', response.strip())
-        content = re.sub(r'\s*```$', '', content)
-        return json.loads(content)
-    except:
-        try:
-            match = re.search(r'\{[\s\S]*\}', response)
-            if match:
-                return json.loads(match.group(0))
-        except:
-            pass
-    return None
-
-# ===== SMART EXTRACTION =====
-
-def extract_name(text, lines):
-    """Extract candidate name from first few lines"""
-    for line in lines[:8]:
-        line = line.strip()
-        if not line or len(line) < 3 or len(line) > 45:
-            continue
-        # Skip lines with contact info or headers
-        if re.search(r'@|http|www\.|phone|mobile|email|resume|cv|address|linkedin|github|\d{6,}', line, re.I):
-            continue
-        # Skip job titles appearing at top
-        if re.search(r'engineer|developer|manager|analyst|designer|consultant|intern|executive|specialist', line, re.I):
-            continue
-        words = line.split()
-        if 2 <= len(words) <= 4:
-            # Check if words look like names (capitalized)
-            if all(w[0].isupper() for w in words if w and len(w) > 1):
-                return line
-    return "Unknown"
-
-def extract_email(text):
-    match = re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
-    return match.group(0) if match else ""
-
-def extract_phone(text):
-    # Indian format
-    match = re.search(r'\+91[\s\-]?\d{10}|\+91[\s\-]?\d{5}[\s\-]?\d{5}', text)
-    if match:
-        return re.sub(r'[\s\-]', '', match.group(0))
-    # General 10 digit
-    match = re.search(r'[6-9]\d{9}', text)
-    if match:
-        return match.group(0)
-    return ""
-
-def extract_location(_text):
-    """Let AI handle location extraction - return empty for regex fallback"""
-    # AI will intelligently determine current location vs education location
-    # No hardcoded logic here
-    return ""
-
-def extract_current_role(text, lines):
-    """Extract current job title from experience section"""
-    in_exp = False
-
-    for i, line in enumerate(lines):
-        line_clean = line.strip()
-        line_lower = line_clean.lower()
-
-        # Detect experience section
-        if re.match(r'^(professional\s+experience|work\s+experience|employment|experience)$', line_lower):
-            in_exp = True
-            continue
-
-        # Exit on other sections
-        if re.match(r'^(education|skills|technical\s+skills|projects|certifications|achievements)', line_lower):
-            if in_exp:
-                break
-            continue
-
-        if in_exp and line_clean:
-            # Skip bullet points
-            if line_clean.startswith(('•', '-', '*', '–')):
-                continue
-
-            # Look for "Role | Company" or "Role at Company" patterns
-            role_match = re.match(r'^([A-Za-z][A-Za-z\s\-/]+?)\s*[|–\-]\s*[A-Za-z]', line_clean)
-            if role_match:
-                role = role_match.group(1).strip()
-                # Validate it looks like a job title
-                if 3 < len(role) < 50 and not re.search(r'\d{4}|present|current', role, re.I):
-                    return role
-
-            # Look for standalone role (next line might be company)
-            if re.match(r'^[A-Z][a-z]+(?:\s+[A-Z]?[a-z]+)*\s*(?:Engineer|Developer|Manager|Analyst|Designer|Specialist|Executive|Consultant|Intern|Lead|Director|Officer|Coordinator|Assistant)', line_clean):
-                return line_clean.split('|')[0].split('–')[0].strip()
-
-    return ""
-
-def extract_experience_years(text):
-    """Calculate years of experience from job dates in EXPERIENCE section only"""
-    lines = text.split('\n')
-    current_year = datetime.now().year
-
-    # First check for explicit mention
-    exp_match = re.search(r'(\d+)\+?\s*(?:years?|yrs?)[\s\-]*(?:of\s+)?(?:experience|exp)', text, re.I)
-    if exp_match:
-        years = int(exp_match.group(1))
-        if 0 < years <= 30:
-            return years
-
-    # Find the EXPERIENCE section only
-    exp_section = ""
-    in_exp = False
-    for line in lines:
-        line_lower = line.lower().strip()
-        # Start of experience section
-        if re.match(r'^(professional\s+experience|work\s+experience|employment\s+history|experience)$', line_lower):
-            in_exp = True
-            continue
-        # End on other major sections
-        if re.match(r'^(education|skills|technical\s+skills|projects|certifications|achievements|key\s+projects)', line_lower):
-            if in_exp:
-                break
-        if in_exp:
-            exp_section += line + "\n"
-
-    if not exp_section:
-        exp_section = text  # Fallback to full text if no section found
-
-    # Find date ranges like "Sep 2025 - Present" or "2020 - 2022"
-    date_pattern = r'(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s*(\d{4})\s*[-–]\s*(?:Present|Current|Now|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s*(\d{4}))'
-
-    matches = re.findall(date_pattern, exp_section, re.I)
-
-    if not matches:
-        return 0
-
-    # Calculate total experience (handle potential overlaps by taking min-max range)
-    start_years = []
-    end_years = []
-
-    for match in matches:
-        start_year = int(match[0])
-        if match[1] and match[1].isdigit():
-            end_year = int(match[1])
-        else:
-            end_year = current_year
-
-        if 1990 <= start_year <= current_year and start_year <= end_year <= current_year + 1:
-            start_years.append(start_year)
-            end_years.append(end_year)
-
-    if start_years and end_years:
-        # Total span from earliest start to latest end
-        total_years = max(end_years) - min(start_years)
-        return min(max(total_years, 1), 30)
-
-    return 0
-
-def extract_education(text):
-    patterns = [
-        r"(B\.?Tech|M\.?Tech|Bachelor(?:'s)?(?:\s+of\s+[A-Za-z]+)?|Master(?:'s)?(?:\s+of\s+[A-Za-z]+)?|MBA|BCA|MCA|B\.?E\.?|M\.?E\.?|B\.?Com|M\.?Com|B\.?Sc|M\.?Sc|PhD|Ph\.?D\.?)",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text, re.I)
-        if match:
-            return match.group(1)
-    return ""
-
-def extract_skills(text, lines):
-    """Extract skills from resume - handles multiple formats including Category: skill1, skill2"""
-    skills = []
-    in_skills = False
-    skills_lines = []
-
-    for line in lines:
-        line_lower = line.lower().strip()
-
-        # Detect skills section
-        if re.match(r'^(technical\s+skills?|skills?|key\s+skills?|core\s+competenc|areas?\s+of\s+expertise)', line_lower):
-            in_skills = True
-            continue
-
-        # Exit on other sections
-        if re.match(r'^(professional\s+experience|work\s+experience|employment|education|projects|certifications|achievements|experience|summary|objective)', line_lower):
-            if in_skills:
-                break
-            continue
-
-        if in_skills and line.strip():
-            skills_lines.append(line.strip())
-
-    # Parse each line - handle "Category: skill1, skill2, skill3" format
-    for line in skills_lines:
-        # Check if line has "Category: values" format
-        if ':' in line:
-            # Split by colon and take the values part
-            parts = line.split(':', 1)
-            if len(parts) > 1:
-                values_part = parts[1].strip()
-                # Split values by comma
-                items = re.split(r'[,;]+', values_part)
-                for item in items:
-                    item = item.strip()
-                    if 2 <= len(item) <= 40:
-                        skills.append(item)
-        else:
-            # No colon - split by common delimiters
-            items = re.split(r'[,;|•]+', line)
-            for item in items:
-                item = item.strip()
-                item = re.sub(r'^[\-\*\s•]+', '', item)
-                if 2 <= len(item) <= 40:
-                    skills.append(item)
-
-    # Also try inline format if no skills found
-    if not skills:
-        # Look for "Skills: Python, Java, SQL" anywhere
-        inline_match = re.search(r'(?:skills?|competencies)[:\s]+([^\n]{10,300})', text, re.I)
-        if inline_match:
-            items = re.split(r'[,;|•]+', inline_match.group(1))
-            for item in items:
-                item = item.strip()
-                if 2 <= len(item) <= 40:
-                    skills.append(item)
-
-    # Clean up and deduplicate
-    cleaned = []
-    seen = set()
-    for s in skills:
-        s = s.strip()
-        s_lower = s.lower()
-
-        # Skip empty, too short, or duplicates
-        if len(s) >= 2 and s_lower not in seen and len(s.split()) <= 5:
-            seen.add(s_lower)
-            cleaned.append(s)
-
-    return cleaned[:20]
-
-def extract_all_regex(text):
-    """Extract all fields using regex"""
-    lines = text.split('\n')
-
-    return {
-        "name": extract_name(text, lines),
-        "email": extract_email(text),
-        "phone": extract_phone(text),
-        "location": extract_location(text),
-        "experience_years": extract_experience_years(text),
-        "current_role": extract_current_role(text, lines),
-        "education": extract_education(text),
-        "skills": extract_skills(text, lines)
-    }
-
-def analyze_with_ai(resume_text, job_description):
-    """Use AI to analyze ONE resume"""
-    prompt = f"""Analyze THIS SINGLE RESUME and match against the job description.
-
-=== RESUME START ===
-{resume_text[:4500]}
-=== RESUME END ===
-
-=== JOB DESCRIPTION ===
-{job_description[:1200]}
-=== JOB END ===
-
-Extract information from THIS resume only. Return JSON with these exact keys:
-
-{{
-  "name": "candidate's full name from top of resume",
-  "email": "email address",
-  "phone": "phone number",
-  "location": "current city from contact area only (NOT from education section)",
-  "experience_years": number of years calculated from work dates,
-  "current_role": "most recent job title",
-  "education": "highest degree like B.Tech, MBA",
-  "skills": ["skill1", "skill2", ...],
-  "matched_skills": ["skills that match job"],
-  "missing_skills": ["required skills candidate lacks"],
-  "score": number 0-100,
-  "recommendation": "Best/Good/Average/Poor"
-}}
-
-Rules:
-- name: First line that looks like a person's name
-- location: City near contact info (email/phone). If city only appears with university, return ""
-- experience_years: Count years from work experience dates, return as NUMBER not string
-- skills: List ALL skills from skills section
-- score: 80+ = Best, 65-79 = Good, 50-64 = Average, <50 = Poor
-
-Return ONLY the JSON object:"""
-
-    response = call_ai(prompt)
-    result = parse_ai_json(response)
-
-    # Log for debugging
-    if result:
-        print(f"AI extracted: {result.get('name', 'NO NAME')} | {result.get('email', 'NO EMAIL')}")
-
-    return result
-
-def calculate_score(resume_data, job_text):
-    """Calculate match score"""
-    job_lower = job_text.lower()
-    skills = resume_data.get('skills', [])
-    role = resume_data.get('current_role', '').lower()
-    exp = resume_data.get('experience_years', 0)
-
-    matched = [s for s in skills if s.lower() in job_lower]
-
-    # Base score
-    if skills:
-        score = int((len(matched) / len(skills)) * 50) + 20
-    else:
-        score = 30
-
-    # Experience bonus
-    if exp >= 5:
-        score += 15
-    elif exp >= 2:
-        score += 10
-    elif exp >= 1:
-        score += 5
-
-    # Role relevance
-    if role:
-        role_words = [w for w in role.split() if len(w) > 3]
-        if any(w in job_lower for w in role_words):
-            score += 15
-
-    score = min(95, max(20, score))
-
-    if score >= 80:
-        rec = "Best"
-    elif score >= 65:
-        rec = "Good"
-    elif score >= 50:
-        rec = "Average"
-    else:
-        rec = "Poor"
-
-    return {"score": score, "matched_skills": matched, "recommendation": rec}
-
-def process_resume(resume_text, job_text, frontend_data):
-    """Process single resume"""
-    # Try AI first
-    ai_result = analyze_with_ai(resume_text, job_text)
-
-    if ai_result and ai_result.get('name') and len(ai_result.get('name', '')) > 2:
-        print(f"AI: {ai_result.get('name')} - {ai_result.get('current_role')} - Score: {ai_result.get('score')}")
-
-        # Validate AI results
-        score = ai_result.get('score', 50)
-        if not isinstance(score, (int, float)):
-            score = 50
-        score = max(0, min(100, int(score)))
-
-        # Get all skills and matched skills
-        all_skills = ai_result.get('skills', [])
-        matched_skills = ai_result.get('matched_skills', [])
-
-        # Use all skills for display, matched for highlighting
-        display_skills = all_skills[:15] if all_skills else matched_skills[:10]
-
-        return {
-            "name": ai_result.get('name') or frontend_data.get('name', 'Unknown'),
-            "email": ai_result.get('email') or frontend_data.get('email', ''),
-            "phone": ai_result.get('phone') or frontend_data.get('phone', ''),
-            "location": ai_result.get('location', ''),  # AI decides location - no fallback
-            "experience": ai_result.get('experience_years', 0),
-            "currentRole": ai_result.get('current_role') or frontend_data.get('currentRole', ''),
-            "currentCompany": ai_result.get('current_company', ''),
-            "education": ai_result.get('education', ''),
-            "skills": display_skills,
-            "coveredSkills": matched_skills,
-            "missingSkills": ai_result.get('missing_skills', []),
-            "score": score,
-            "recommendation": ai_result.get('recommendation', 'Average'),
-            "analyzedBy": "ai"
-        }
-
-    # Fallback to regex
-    print("Using regex fallback")
-    extracted = extract_all_regex(resume_text)
-    score_data = calculate_score(extracted, job_text)
-
-    # Get all extracted skills
-    all_skills = extracted.get('skills', [])
-    matched_skills = score_data.get('matched_skills', [])
-
-    return {
-        "name": extracted.get('name') or frontend_data.get('name', 'Unknown'),
-        "email": extracted.get('email') or frontend_data.get('email', ''),
-        "phone": extracted.get('phone') or frontend_data.get('phone', ''),
-        "location": extracted.get('location', ''),  # No fallback - empty if not found
-        "experience": extracted.get('experience_years', 0),
-        "currentRole": extracted.get('current_role') or frontend_data.get('currentRole', ''),
-        "currentCompany": "",
-        "education": extracted.get('education', ''),
-        "skills": all_skills[:15] if all_skills else matched_skills[:10],
-        "coveredSkills": matched_skills,
-        "missingSkills": [],
-        "score": score_data.get('score', 40),
-        "recommendation": score_data.get('recommendation', 'Poor'),
-        "analyzedBy": "regex"
-    }
-
-def analyze_resumes(job_text, candidates):
-    ranking = []
-
-    for c in candidates:
-        resume_text = c.get("resume", "")
-
-        # PDF extraction
-        pdf_data = c.get("pdfData", "")
+def add_cors_headers(response):
+    """Add CORS headers to response."""
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+    return response
+
+
+# ============================================================================
+# MAIN ANALYSIS FUNCTION
+# ============================================================================
+
+def analyze_candidates(
+    job_description: str,
+    resume_data: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """
+    Main analysis function - processes JD and resumes through the new pipeline.
+
+    Args:
+        job_description: Raw job description text
+        resume_data: List of resume data dicts from frontend
+
+    Returns:
+        Analysis results with rankings and reports
+    """
+    start_time = time.time()
+    metadata = AnalysisMetadata()
+
+    # -------------------------------------------------------------------------
+    # STEP 1: Parse Job Description
+    # -------------------------------------------------------------------------
+    print("[Analysis] Step 1: Parsing job description...")
+    jd_requirements = parse_job_description(job_description)
+    print(f"[Analysis] JD parsed: {len(jd_requirements.required_skills)} required, "
+          f"{len(jd_requirements.preferred_skills)} preferred skills")
+    metadata.ai_calls_made += 1
+
+    # -------------------------------------------------------------------------
+    # STEP 2: Prepare Resumes
+    # -------------------------------------------------------------------------
+    print(f"[Analysis] Step 2: Processing {len(resume_data)} resumes...")
+    resumes_to_process = []
+
+    for item in resume_data:
+        resume_text = item.get("resume", "") or item.get("text", "")
+
+        # Try PDF extraction if available
+        pdf_data = item.get("pdfData", "")
         if pdf_data and PDF_LIBRARY:
             try:
                 pdf_bytes = base64.b64decode(pdf_data)
                 extracted = extract_text_from_pdf_bytes(pdf_bytes)
                 if extracted and len(extracted) > 50:
                     resume_text = extracted
-            except:
-                pass
+            except Exception as e:
+                print(f"[PDF] Decode error: {e}")
 
+        # Skip invalid resumes
         if not resume_text or len(resume_text.strip()) < 50:
+            print(f"[Analysis] Skipping invalid resume: {item.get('name', 'unknown')}")
             continue
 
-        result = process_resume(resume_text, job_text, c)
-        result["linkedin"] = c.get("linkedin", "")
-        result["title"] = result.get("currentRole", "")
-        ranking.append(result)
+        resumes_to_process.append({
+            "filename": item.get("name", "") or item.get("filename", ""),
+            "text": clean_text(resume_text)
+        })
 
-    ranking.sort(key=lambda x: x.get("score", 0), reverse=True)
-    return ranking
+    if not resumes_to_process:
+        return {
+            "ranking": [],
+            "jd_analysis": jd_requirements.to_dict(),
+            "candidateCount": 0,
+            "bestCandidate": None,
+            "ai_provider": get_ai_config()['provider'] if get_ai_config() else "none",
+            "metadata": {
+                "total_candidates": 0,
+                "processing_time_ms": int((time.time() - start_time) * 1000)
+            }
+        }
 
-# Routes
+    metadata.total_candidates = len(resumes_to_process)
+
+    # -------------------------------------------------------------------------
+    # STEP 3: Parse Resumes (Batch or Individual)
+    # -------------------------------------------------------------------------
+    print(f"[Analysis] Step 3: Parsing {len(resumes_to_process)} resumes...")
+
+    # Use batch processing for efficiency (fewer AI calls)
+    if len(resumes_to_process) > 3:
+        # Batch process in groups of 5
+        all_profiles = []
+        batch_size = 5
+        for i in range(0, len(resumes_to_process), batch_size):
+            batch = resumes_to_process[i:i + batch_size]
+            profiles = parse_resumes_batch(batch, jd_requirements)
+            all_profiles.extend(profiles)
+            metadata.ai_calls_made += 1
+    else:
+        # Individual processing for small batches
+        all_profiles = []
+        for resume in resumes_to_process:
+            profile = parse_resume(
+                resume['text'],
+                resume['filename'],
+                jd_requirements
+            )
+            all_profiles.append(profile)
+            metadata.ai_calls_made += 1
+
+    print(f"[Analysis] Parsed {len(all_profiles)} candidate profiles")
+    metadata.successful_analyses = len(all_profiles)
+
+    # -------------------------------------------------------------------------
+    # STEP 4: Match and Score Candidates
+    # -------------------------------------------------------------------------
+    print("[Analysis] Step 4: Matching candidates to requirements...")
+    analyzed_candidates: List[AnalyzedCandidate] = []
+
+    for profile in all_profiles:
+        # Calculate match
+        match_result = calculate_match(profile, jd_requirements)
+
+        # Generate report
+        report = generate_report(profile, jd_requirements, match_result)
+
+        # Create analyzed candidate
+        analyzed = AnalyzedCandidate(
+            profile=profile,
+            match_result=match_result,
+            report=report,
+            analyzed_by="ai"
+        )
+        analyzed_candidates.append(analyzed)
+
+    # -------------------------------------------------------------------------
+    # STEP 5: Rank and Format Results
+    # -------------------------------------------------------------------------
+    print("[Analysis] Step 5: Ranking candidates...")
+
+    # Sort by overall score
+    analyzed_candidates.sort(
+        key=lambda x: x.match_result.scores.overall,
+        reverse=True
+    )
+
+    # Convert to response format
+    ranking = [c.to_response_dict() for c in analyzed_candidates]
+
+    # Calculate processing time
+    processing_time = int((time.time() - start_time) * 1000)
+
+    print(f"[Analysis] Complete! {len(ranking)} candidates ranked in {processing_time}ms")
+
+    config = get_ai_config()
+
+    return {
+        "ranking": ranking,
+        "jd_analysis": jd_requirements.to_dict(),
+        "candidateCount": len(ranking),
+        "bestCandidate": ranking[0] if ranking else None,
+        "ai_provider": config['provider'] if config else "basic",
+        "metadata": {
+            "total_candidates": metadata.total_candidates,
+            "successful_analyses": metadata.successful_analyses,
+            "ai_calls_made": metadata.ai_calls_made,
+            "processing_time_ms": processing_time
+        }
+    }
+
+
+# ============================================================================
+# API ROUTES
+# ============================================================================
+
 @app.route('/api/test-ai', methods=['GET', 'POST', 'OPTIONS'])
 def test_ai():
+    """Test AI connectivity endpoint."""
     if request.method == 'OPTIONS':
-        resp = make_response()
-        resp.headers['Access-Control-Allow-Origin'] = '*'
-        resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
-        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
-        return resp
+        return add_cors_headers(make_response())
 
     config = get_ai_config()
     if not config:
-        resp = jsonify({"success": False, "error": "No API key"})
-        resp.headers['Access-Control-Allow-Origin'] = '*'
-        return resp
+        resp = jsonify({"success": False, "error": "No API key configured"})
+        return add_cors_headers(resp)
 
-    test = call_ai("Reply with: OK", max_tokens=10)
+    from .utils import call_ai
+    test_response = call_ai("Reply with exactly: OK", max_tokens=10)
+
     resp = jsonify({
-        "success": test is not None,
+        "success": test_response is not None,
         "provider": config['provider'],
         "model": config['model'],
-        "response": test
+        "response": test_response
     })
-    resp.headers['Access-Control-Allow-Origin'] = '*'
-    return resp
+    return add_cors_headers(resp)
+
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check endpoint."""
+    config = get_ai_config()
+    resp = jsonify({
+        "status": "healthy",
+        "version": "5.0",
+        "ai_enabled": config is not None,
+        "ai_provider": config['provider'] if config else None,
+        "pdf_library": PDF_LIBRARY
+    })
+    return add_cors_headers(resp)
+
 
 @app.route('/api', methods=['GET', 'POST', 'OPTIONS'])
 @app.route('/api/', methods=['GET', 'POST', 'OPTIONS'])
-@app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'OPTIONS'])
-@app.route('/<path:path>', methods=['GET', 'POST', 'OPTIONS'])
-def main_route(path=''):
+@app.route('/api/analyze', methods=['GET', 'POST', 'OPTIONS'])
+@app.route('/api/rank', methods=['POST', 'OPTIONS'])
+def main_route():
+    """Main API endpoint for analysis."""
+    # Handle CORS preflight
     if request.method == 'OPTIONS':
-        resp = make_response()
-        resp.headers['Access-Control-Allow-Origin'] = '*'
-        resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
-        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
-        return resp
+        return add_cors_headers(make_response())
 
+    # Handle GET request - return API info
     if request.method == 'GET':
         config = get_ai_config()
         resp = jsonify({
             "api": "Smart Screener ATS",
-            "version": "4.0",
+            "version": "5.0",
+            "description": "AI-powered resume screening with recruiter-level analysis",
             "ai_enabled": config is not None,
             "ai_provider": config['provider'] if config else None,
-            "pdf_library": PDF_LIBRARY
+            "pdf_library": PDF_LIBRARY,
+            "endpoints": {
+                "POST /api/": "Main analysis endpoint",
+                "POST /api/analyze": "Alias for main analysis",
+                "POST /api/rank": "Alias for main analysis",
+                "GET /api/test-ai": "Test AI connectivity",
+                "GET /api/health": "Health check"
+            }
         })
-        resp.headers['Access-Control-Allow-Origin'] = '*'
-        return resp
+        return add_cors_headers(resp)
 
+    # Handle POST request - perform analysis
     try:
         data = request.get_json(force=True) or {}
-    except:
+    except Exception:
         data = {}
 
-    # Auth
+    # Authentication check
     if 'password' in data and 'jobDescription' not in data:
         submitted = data.get("password", "")
         correct = get_password()
+
         if not correct:
-            resp = jsonify({"success": False, "error": "Set APP_PASSWORD"})
+            resp = jsonify({"success": False, "error": "Password not configured"})
             resp.status_code = 500
         elif submitted == correct:
-            token = hash_password(correct + "smart-screener-session")
+            token = hash_password(correct + "smart-screener-v5")
             resp = jsonify({"success": True, "token": token})
         else:
             resp = jsonify({"success": False, "error": "Invalid password"})
             resp.status_code = 401
-        resp.headers['Access-Control-Allow-Origin'] = '*'
-        return resp
 
-    # Analysis
-    job_text = data.get("jobDescription", "")
-    uploaded = data.get("resumes", [])
+        return add_cors_headers(resp)
 
-    if not job_text:
-        resp = jsonify({"error": "Job description required", "ranking": []})
+    # Validate input
+    job_description = data.get("jobDescription", "")
+    if not job_description:
+        resp = jsonify({
+            "error": "Job description is required",
+            "ranking": []
+        })
         resp.status_code = 400
-        resp.headers['Access-Control-Allow-Origin'] = '*'
-        return resp
+        return add_cors_headers(resp)
 
-    candidates = []
-    for item in uploaded:
-        if isinstance(item, dict):
-            candidates.append({
-                "name": item.get("name", ""),
-                "email": item.get("email", ""),
-                "phone": item.get("phone", ""),
-                "location": item.get("location", ""),
-                "experience": item.get("experience", 0),
-                "currentRole": item.get("currentRole", ""),
-                "currentCompany": item.get("currentCompany", ""),
-                "education": item.get("education", ""),
-                "linkedin": item.get("linkedin", ""),
-                "resume": item.get("resume") or item.get("text") or "",
-                "pdfData": item.get("pdfData", "")
-            })
-        else:
-            candidates.append({"resume": str(item)})
+    # Get resume data
+    resume_data = data.get("resumes", [])
+    if not resume_data:
+        resp = jsonify({
+            "error": "At least one resume is required",
+            "ranking": []
+        })
+        resp.status_code = 400
+        return add_cors_headers(resp)
 
-    config = get_ai_config()
-    ranking = analyze_resumes(job_text, candidates)
+    # Run analysis
+    try:
+        result = analyze_candidates(job_description, resume_data)
+        resp = jsonify(result)
+    except Exception as e:
+        print(f"[API] Analysis error: {type(e).__name__}: {e}")
+        resp = jsonify({
+            "error": f"Analysis failed: {str(e)}",
+            "ranking": []
+        })
+        resp.status_code = 500
 
-    resp = jsonify({
-        "ranking": ranking,
-        "candidateCount": len(ranking),
-        "bestCandidate": ranking[0] if ranking else None,
-        "ai_provider": config['provider'] if config else "basic"
-    })
-    resp.headers['Access-Control-Allow-Origin'] = '*'
-    return resp
+    return add_cors_headers(resp)
+
+
+# Catch-all route for Vercel
+@app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'OPTIONS'])
+@app.route('/<path:path>', methods=['GET', 'POST', 'OPTIONS'])
+def catch_all(path=''):
+    """Catch-all route - redirects to main API."""
+    return main_route()
+
+
+# ============================================================================
+# LOCAL DEVELOPMENT
+# ============================================================================
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)

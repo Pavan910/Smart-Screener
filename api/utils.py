@@ -1,0 +1,340 @@
+"""
+Shared utilities for Smart-Screener v5.0
+Handles AI calls, JSON parsing, caching, and common functions.
+"""
+
+import os
+import re
+import json
+import hashlib
+import urllib.request
+import urllib.error
+from typing import Optional, Dict, Any, Callable
+from datetime import datetime
+from functools import wraps
+
+# Simple in-memory cache for serverless (resets on cold start)
+_cache: Dict[str, Dict[str, Any]] = {}
+
+
+def get_ai_config() -> Optional[Dict[str, str]]:
+    """Get AI provider configuration from environment."""
+    groq_key = os.environ.get('GROQ_API_KEY', '')
+    if groq_key:
+        return {
+            'provider': 'groq',
+            'api_key': groq_key,
+            'base_url': 'https://api.groq.com/openai/v1/chat/completions',
+            'model': 'llama-3.3-70b-versatile'
+        }
+
+    openai_key = os.environ.get('OPENAI_API_KEY', '')
+    if openai_key:
+        return {
+            'provider': 'openai',
+            'api_key': openai_key,
+            'base_url': 'https://api.openai.com/v1/chat/completions',
+            'model': 'gpt-4o-mini'  # Cost-effective for structured extraction
+        }
+
+    return None
+
+
+def call_ai(
+    prompt: str,
+    system_prompt: str = "You are an expert technical recruiter and resume analyst. Extract information accurately and return valid JSON.",
+    max_tokens: int = 2000,
+    temperature: float = 0.1
+) -> Optional[str]:
+    """
+    Call AI provider (Groq or OpenAI) with given prompt.
+
+    Args:
+        prompt: User prompt to send
+        system_prompt: System instruction
+        max_tokens: Maximum response tokens
+        temperature: Response temperature (lower = more deterministic)
+
+    Returns:
+        AI response text or None on failure
+    """
+    config = get_ai_config()
+    if not config:
+        print("No AI config available")
+        return None
+
+    try:
+        data = json.dumps({
+            "model": config['model'],
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": temperature,
+            "max_tokens": max_tokens
+        }).encode('utf-8')
+
+        req = urllib.request.Request(
+            config['base_url'],
+            data=data,
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {config["api_key"]}'
+            }
+        )
+
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read().decode('utf-8'))
+            content = result['choices'][0]['message']['content'].strip()
+            print(f"[AI] {config['provider']}: {len(content)} chars response")
+            return content
+
+    except urllib.error.HTTPError as e:
+        print(f"[AI] HTTP Error {e.code}: {e.reason}")
+        return None
+    except urllib.error.URLError as e:
+        print(f"[AI] URL Error: {e.reason}")
+        return None
+    except Exception as e:
+        print(f"[AI] Error: {type(e).__name__}: {e}")
+        return None
+
+
+def parse_ai_json(response: Optional[str]) -> Optional[Dict[str, Any]]:
+    """
+    Parse JSON from AI response, handling markdown code blocks.
+
+    Args:
+        response: Raw AI response text
+
+    Returns:
+        Parsed JSON dictionary or None
+    """
+    if not response:
+        return None
+
+    try:
+        # Remove markdown code blocks
+        content = re.sub(r'^```(?:json)?\s*', '', response.strip())
+        content = re.sub(r'\s*```$', '', content)
+        return json.loads(content)
+    except json.JSONDecodeError:
+        pass
+
+    # Try to extract JSON object from response
+    try:
+        match = re.search(r'\{[\s\S]*\}', response)
+        if match:
+            return json.loads(match.group(0))
+    except json.JSONDecodeError:
+        pass
+
+    # Try to extract JSON array
+    try:
+        match = re.search(r'\[[\s\S]*\]', response)
+        if match:
+            return json.loads(match.group(0))
+    except json.JSONDecodeError:
+        pass
+
+    print(f"[JSON] Failed to parse: {response[:200]}...")
+    return None
+
+
+def generate_hash(text: str) -> str:
+    """Generate MD5 hash of text for caching/deduplication."""
+    return hashlib.md5(text.encode('utf-8')).hexdigest()
+
+
+def cache_key(prefix: str, *args) -> str:
+    """Generate cache key from prefix and arguments."""
+    content = prefix + "|" + "|".join(str(a) for a in args)
+    return generate_hash(content)
+
+
+def get_cached(key: str) -> Optional[Any]:
+    """Get value from cache if exists and not expired."""
+    if key in _cache:
+        entry = _cache[key]
+        if entry.get('expires_at', 0) > datetime.now().timestamp():
+            print(f"[Cache] Hit: {key[:16]}...")
+            return entry.get('value')
+        else:
+            del _cache[key]
+    return None
+
+
+def set_cached(key: str, value: Any, ttl_seconds: int = 3600) -> None:
+    """Set value in cache with TTL."""
+    _cache[key] = {
+        'value': value,
+        'expires_at': datetime.now().timestamp() + ttl_seconds
+    }
+    print(f"[Cache] Set: {key[:16]}... (TTL: {ttl_seconds}s)")
+
+
+def cached(ttl_seconds: int = 3600):
+    """Decorator for caching function results."""
+    def decorator(func: Callable):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Generate cache key from function name and arguments
+            key = cache_key(func.__name__, *args, *kwargs.values())
+
+            # Check cache
+            result = get_cached(key)
+            if result is not None:
+                return result
+
+            # Call function and cache result
+            result = func(*args, **kwargs)
+            if result is not None:
+                set_cached(key, result, ttl_seconds)
+
+            return result
+        return wrapper
+    return decorator
+
+
+def clean_text(text: str) -> str:
+    """Clean and normalize text for processing."""
+    if not text:
+        return ""
+
+    # Replace various unicode whitespace with regular space
+    text = re.sub(r'[\u00a0\u2000-\u200b\u2028\u2029\u202f\u205f\u3000]', ' ', text)
+
+    # Replace multiple whitespace with single space
+    text = re.sub(r'[ \t]+', ' ', text)
+
+    # Clean up multiple newlines
+    text = re.sub(r'\n{3,}', '\n\n', text)
+
+    # Remove leading/trailing whitespace from lines
+    lines = [line.strip() for line in text.split('\n')]
+    text = '\n'.join(lines)
+
+    return text.strip()
+
+
+def extract_email(text: str) -> str:
+    """Extract email address from text."""
+    match = re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
+    return match.group(0).lower() if match else ""
+
+
+def extract_phone(text: str) -> str:
+    """Extract phone number from text (supports multiple formats)."""
+    patterns = [
+        r'\+91[\s\-]?\d{5}[\s\-]?\d{5}',      # Indian: +91-XXXXX-XXXXX
+        r'\+91[\s\-]?\d{10}',                   # Indian: +91-XXXXXXXXXX
+        r'\+1[\s\-]?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{4}',  # US: +1-XXX-XXX-XXXX
+        r'\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{4}',  # US: (XXX) XXX-XXXX
+        r'[6-9]\d{9}',                          # Indian mobile: XXXXXXXXXX
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return re.sub(r'[\s\-\(\)]', '', match.group(0))
+
+    return ""
+
+
+def extract_linkedin(text: str) -> str:
+    """Extract LinkedIn URL from text."""
+    match = re.search(r'linkedin\.com/in/([a-zA-Z0-9\-_]+)', text, re.I)
+    if match:
+        return f"https://linkedin.com/in/{match.group(1)}"
+    return ""
+
+
+def extract_github(text: str) -> str:
+    """Extract GitHub URL from text."""
+    match = re.search(r'github\.com/([a-zA-Z0-9\-_]+)', text, re.I)
+    if match:
+        return f"https://github.com/in/{match.group(1)}"
+    return ""
+
+
+def calculate_months_between(start: str, end: str) -> int:
+    """
+    Calculate months between two date strings.
+
+    Args:
+        start: Start date (YYYY-MM or YYYY)
+        end: End date (YYYY-MM, YYYY, or "Present")
+
+    Returns:
+        Number of months between dates
+    """
+    current_year = datetime.now().year
+    current_month = datetime.now().month
+
+    def parse_date(date_str: str) -> tuple:
+        """Parse date string to (year, month) tuple."""
+        if not date_str or date_str.lower() in ['present', 'current', 'now']:
+            return (current_year, current_month)
+
+        # Try YYYY-MM format
+        match = re.match(r'(\d{4})[-/](\d{1,2})', date_str)
+        if match:
+            return (int(match.group(1)), int(match.group(2)))
+
+        # Try just YYYY
+        match = re.match(r'(\d{4})', date_str)
+        if match:
+            return (int(match.group(1)), 6)  # Assume mid-year
+
+        return (current_year, current_month)
+
+    start_year, start_month = parse_date(start)
+    end_year, end_month = parse_date(end)
+
+    # Validate years
+    if start_year < 1980 or start_year > current_year + 1:
+        return 0
+    if end_year < 1980 or end_year > current_year + 1:
+        return 0
+
+    months = (end_year - start_year) * 12 + (end_month - start_month)
+    return max(0, months)
+
+
+def truncate_text(text: str, max_length: int = 4000, suffix: str = "...") -> str:
+    """Truncate text to max length, preserving word boundaries."""
+    if len(text) <= max_length:
+        return text
+
+    truncated = text[:max_length - len(suffix)]
+    # Try to break at word boundary
+    last_space = truncated.rfind(' ')
+    if last_space > max_length * 0.8:
+        truncated = truncated[:last_space]
+
+    return truncated + suffix
+
+
+def safe_int(value: Any, default: int = 0) -> int:
+    """Safely convert value to integer."""
+    if value is None:
+        return default
+    try:
+        return int(float(value))
+    except (ValueError, TypeError):
+        return default
+
+
+def safe_float(value: Any, default: float = 0.0) -> float:
+    """Safely convert value to float."""
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+
+
+def clamp(value: int, min_val: int, max_val: int) -> int:
+    """Clamp value between min and max."""
+    return max(min_val, min(max_val, value))

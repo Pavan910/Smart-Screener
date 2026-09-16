@@ -257,7 +257,12 @@ def test_ai():
         resp = jsonify({"success": False, "error": "No API key configured"})
         return add_cors_headers(resp)
 
-    from .utils import call_ai
+    # Import call_ai with fallback for Vercel
+    try:
+        from .utils import call_ai
+    except ImportError:
+        from utils import call_ai
+
     test_response = call_ai("Reply with exactly: OK", max_tokens=10)
 
     resp = jsonify({

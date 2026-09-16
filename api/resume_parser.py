@@ -33,8 +33,8 @@ except ImportError:
     from skill_taxonomy import normalize_skills
 
 
-# AI prompt for resume extraction
-RESUME_EXTRACTION_PROMPT = """You are an expert resume analyst. Extract ALL information from this resume comprehensively.
+# AI prompt for resume extraction - optimized for GPT-4o
+RESUME_EXTRACTION_PROMPT = """You are a senior technical recruiter analyzing a candidate's resume. Your task is to extract comprehensive, structured information with recruiter-level precision.
 
 === RESUME ===
 {resume_text}
@@ -42,61 +42,130 @@ RESUME_EXTRACTION_PROMPT = """You are an expert resume analyst. Extract ALL info
 
 {jd_context}
 
-Extract the following in JSON format. Be thorough - extract EVERYTHING:
+Analyze this resume thoroughly and extract ALL information. Return a JSON object:
 
 {{
-  "candidate_name": "Full name of the candidate (from top of resume)",
+  "candidate_name": "Full legal name (first and last name from header/top)",
   "contact": {{
-    "email": "Email address or empty string",
-    "phone": "Phone number or empty string",
-    "linkedin": "LinkedIn URL or empty string",
-    "github": "GitHub URL or empty string",
-    "location": "Current city/location from contact section (NOT education location)"
+    "email": "Email address",
+    "phone": "Phone number with country code if present",
+    "linkedin": "Full LinkedIn URL",
+    "github": "Full GitHub URL",
+    "portfolio": "Portfolio/personal website if present",
+    "location": "Current city and state/country from CONTACT section only (ignore education locations)"
   }},
-  "professional_summary": "1-2 sentence summary of the candidate's profile",
+  "professional_summary": "2-3 sentence professional summary capturing their expertise, experience level, and key strengths",
+  "current_role": "Most recent/current job title",
+  "current_company": "Most recent/current employer",
   "work_history": [
     {{
       "company": "Company name",
-      "title": "Job title",
-      "start_date": "YYYY-MM or YYYY format",
+      "title": "Exact job title",
+      "start_date": "YYYY-MM format",
       "end_date": "YYYY-MM or 'Present'",
       "is_current": true/false,
-      "key_achievements": ["Achievement 1", "Achievement 2"],
-      "technologies_used": ["Tech 1", "Tech 2"]
+      "duration_months": <calculated months>,
+      "key_achievements": [
+        "Quantified achievement with metrics if available",
+        "Impact statement with numbers/percentages"
+      ],
+      "technologies_used": ["Specific technologies used in this role"],
+      "team_context": "Led team of X / Individual contributor / Collaborated with X teams"
     }}
   ],
-  "total_experience_years": "Calculate from work history dates (number)",
+  "total_experience_years": <number: calculate from earliest job start to latest job end>,
+  "relevant_experience_years": <number: experience in similar roles/technologies>,
   "skills": {{
-    "technical": ["Programming languages, frameworks, databases, etc."],
-    "tools": ["Software, platforms, tools used"],
-    "soft_skills": ["Leadership, communication, etc. if mentioned"]
+    "programming_languages": ["Python", "JavaScript", etc.],
+    "frameworks": ["React", "Django", "Spring", etc.],
+    "databases": ["PostgreSQL", "MongoDB", etc.],
+    "cloud_platforms": ["AWS", "Azure", "GCP", etc.],
+    "devops_tools": ["Docker", "Kubernetes", "Jenkins", etc.],
+    "other_technical": ["Other technical skills"],
+    "soft_skills": ["Leadership", "Communication", etc.]
   }},
   "education": [
     {{
-      "degree": "Degree name (B.Tech, MBA, etc.)",
-      "field_of_study": "Major/Field",
+      "degree": "Degree type (B.Tech, MBA, MS, etc.)",
+      "field_of_study": "Major/Specialization",
       "institution": "University/College name",
-      "graduation_year": "Year as number or null"
+      "graduation_year": <year as number>,
+      "gpa": <GPA if mentioned, null otherwise>,
+      "honors": "Cum Laude, Dean's List, etc. if mentioned"
     }}
   ],
-  "certifications": ["List of certifications"],
-  "career_trajectory": "One of: rising (promotions/growth), lateral (same level moves), mixed, declining, early_career",
+  "certifications": [
+    {{
+      "name": "Certification name",
+      "issuer": "Issuing organization",
+      "year": <year if mentioned>
+    }}
+  ],
+  "projects": [
+    {{
+      "name": "Project name",
+      "description": "Brief description",
+      "technologies": ["Technologies used"],
+      "impact": "Outcome/impact if mentioned"
+    }}
+  ],
+  "career_trajectory": "rising|lateral|mixed|declining|early_career",
+  "career_trajectory_evidence": "Brief explanation of trajectory assessment",
+  "strengths": [
+    "Key strength 1 with evidence from resume",
+    "Key strength 2 with evidence from resume"
+  ],
   "red_flags": [
-    "Job hopping (3+ jobs in 2 years)",
-    "Large unexplained gaps (6+ months)",
-    "Declining responsibilities",
-    "Any other concerns"
-  ]
+    "Only include if actually present: job hopping, gaps, inconsistencies"
+  ],
+  "seniority_level": "intern|junior|mid|senior|lead|principal|executive"
 }}
 
-CRITICAL EXTRACTION RULES:
-1. NAME: Extract the candidate's actual name from the top of resume. Skip file names, titles, headers.
-2. LOCATION: Only use location from contact/header area. Do NOT use location from education section.
-3. EXPERIENCE YEARS: Calculate from actual work dates, not from any claims. Use: max(end_dates) - min(start_dates).
-4. SKILLS: Extract ALL skills mentioned anywhere - technical skills, tools, frameworks, languages.
-5. WORK HISTORY: Extract ALL jobs, with accurate dates. For current job, use "Present" as end_date.
-6. RED FLAGS: Be honest about concerns - job hopping, gaps, inconsistencies.
-7. Return ONLY valid JSON, no additional text or markdown."""
+EXTRACTION RULES:
+
+1. NAME EXTRACTION:
+   - Look at the TOP of the resume (first 3 lines typically)
+   - The name is usually the largest text or first prominent line
+   - Skip "Resume", "CV", "Curriculum Vitae", email addresses, phone numbers
+   - Format: First Last or First Middle Last
+
+2. LOCATION EXTRACTION - CRITICAL:
+   - ONLY extract location from the CONTACT/HEADER section (top of resume)
+   - Look near email/phone for city, state/country
+   - DO NOT use the location of universities or previous employers
+   - If no contact location found, return empty string
+
+3. EXPERIENCE CALCULATION:
+   - Calculate from ACTUAL dates in work history
+   - total_experience_years = (latest_end_date - earliest_start_date) in years
+   - For "Present", use current date
+   - Handle overlapping roles by using overall span
+
+4. SKILLS EXTRACTION - BE THOROUGH:
+   - Extract from dedicated "Skills" section
+   - ALSO extract technologies mentioned in job descriptions
+   - ALSO extract technologies from project descriptions
+   - Normalize skill names (e.g., "JS" → "JavaScript")
+   - Include version numbers when specified
+
+5. ACHIEVEMENTS:
+   - Prioritize quantified achievements (numbers, percentages, metrics)
+   - "Increased X by Y%" or "Reduced Z from A to B"
+   - Extract impact statements
+
+6. CAREER TRAJECTORY:
+   - "rising": Clear promotions, title progression, increasing scope
+   - "lateral": Same-level moves, broadening experience
+   - "declining": Decreasing responsibilities, lower titles
+   - "early_career": <3 years experience, still establishing
+
+7. RED FLAGS (only if ACTUALLY present):
+   - Job hopping: 3+ jobs in 2 years with no apparent reason
+   - Gaps: 6+ months between roles unexplained
+   - Inconsistencies: Overlapping dates, vague descriptions
+   - DO NOT fabricate red flags - return empty array if none found
+
+Return ONLY the JSON object."""
 
 
 # Prompt variation for batch processing
@@ -313,7 +382,7 @@ Experience: {jd_requirements.min_experience_years or 0}-{jd_requirements.max_exp
                         technologies_used=job.get('technologies_used', [])
                     ))
 
-            # Skills
+            # Skills - handle expanded format from GPT-4o
             skills_data = data.get('skills', {})
             if isinstance(skills_data, list):
                 # Handle flat list
@@ -323,8 +392,14 @@ Experience: {jd_requirements.min_experience_years or 0}-{jd_requirements.max_exp
                     soft_skills=[]
                 )
             elif isinstance(skills_data, dict):
+                # Combine all technical skill categories
+                all_technical = []
+                for key in ['programming_languages', 'frameworks', 'databases',
+                           'cloud_platforms', 'devops_tools', 'other_technical', 'technical']:
+                    all_technical.extend(skills_data.get(key, []))
+
                 skills = Skills(
-                    technical=normalize_skills(skills_data.get('technical', [])),
+                    technical=normalize_skills(all_technical),
                     tools=normalize_skills(skills_data.get('tools', [])),
                     soft_skills=skills_data.get('soft_skills', [])
                 )

@@ -193,6 +193,7 @@ class SkillTaxonomy:
         Match candidate skills against job requirements.
 
         Uses fuzzy matching and related skills for better results.
+        Enhanced for GPT-4o extracted skills with semantic matching.
 
         Args:
             candidate_skills: List of candidate's skills
@@ -215,7 +216,7 @@ class SkillTaxonomy:
             for related in self.get_related(skill):
                 candidate_expanded.add(related.lower())
 
-        # Match required skills
+        # Match required skills with enhanced fuzzy matching
         matched_required = []
         missing_required = []
         for skill in required_skills:
@@ -229,9 +230,24 @@ class SkillTaxonomy:
             elif skill_lower in candidate_expanded:
                 matched_required.append(f"{skill_norm} (related)")
             else:
-                missing_required.append(skill_norm)
+                # Try fuzzy matching for close matches
+                best_match = None
+                best_score = 0.0
+                for cand_skill in candidate_skills:
+                    score = self.fuzzy_match(skill, cand_skill)
+                    if score > best_score and score >= 0.7:  # Threshold for fuzzy match
+                        best_score = score
+                        best_match = cand_skill
 
-        # Match preferred skills
+                if best_match:
+                    if best_score >= 0.9:
+                        matched_required.append(skill_norm)
+                    else:
+                        matched_required.append(f"{skill_norm} (related)")
+                else:
+                    missing_required.append(skill_norm)
+
+        # Match preferred skills with same logic
         matched_preferred = []
         missing_preferred = []
         for skill in preferred_skills:
@@ -243,17 +259,48 @@ class SkillTaxonomy:
             elif skill_lower in candidate_expanded:
                 matched_preferred.append(f"{skill_norm} (related)")
             else:
-                missing_preferred.append(skill_norm)
+                # Try fuzzy matching
+                best_match = None
+                best_score = 0.0
+                for cand_skill in candidate_skills:
+                    score = self.fuzzy_match(skill, cand_skill)
+                    if score > best_score and score >= 0.7:
+                        best_score = score
+                        best_match = cand_skill
+
+                if best_match:
+                    if best_score >= 0.9:
+                        matched_preferred.append(skill_norm)
+                    else:
+                        matched_preferred.append(f"{skill_norm} (related)")
+                else:
+                    missing_preferred.append(skill_norm)
 
         # Bonus skills (candidate has but not required)
         all_required = required_norm | preferred_norm
         bonus = []
         for skill in candidate_skills:
             skill_norm = self.normalize(skill)
-            if skill_norm.lower() not in all_required:
+            skill_lower = skill_norm.lower()
+
+            # Check if this skill wasn't matched to any requirement
+            is_bonus = skill_lower not in all_required
+            if is_bonus:
+                # Also check fuzzy matches
+                for req_skill in list(required_norm) + list(preferred_norm):
+                    if self.fuzzy_match(skill_lower, req_skill) >= 0.7:
+                        is_bonus = False
+                        break
+
+            if is_bonus:
                 category = self.get_category(skill_norm)
+                # Include technical skills as bonus
                 if category in ['programming_languages', 'frontend_frameworks',
-                               'backend_frameworks', 'databases', 'cloud_platforms']:
+                               'backend_frameworks', 'databases', 'cloud_platforms',
+                               'devops', 'tools']:
+                    bonus.append(skill_norm)
+                elif not category:
+                    # Unknown category but still a valid skill
                     bonus.append(skill_norm)
 
         return {
@@ -261,7 +308,7 @@ class SkillTaxonomy:
             "missing_required": missing_required,
             "matched_preferred": matched_preferred,
             "missing_preferred": missing_preferred,
-            "bonus_skills": bonus[:10]  # Limit bonus skills
+            "bonus_skills": bonus[:15]  # Allow more bonus skills
         }
 
     def calculate_skill_score(
@@ -308,6 +355,7 @@ class SkillTaxonomy:
         Calculate fuzzy match score between two skills.
 
         Returns 1.0 for exact match, lower for partial matches.
+        Enhanced for GPT-4o extracted skills with semantic understanding.
 
         Args:
             skill1: First skill
@@ -329,9 +377,28 @@ class SkillTaxonomy:
         if n1 == n2:
             return 1.0
 
+        # Version-agnostic matching (React 18 == React, Python 3.11 == Python)
+        s1_base = re.sub(r'[\d\.\s]+$', '', s1).strip()
+        s2_base = re.sub(r'[\d\.\s]+$', '', s2).strip()
+        if s1_base and s2_base and s1_base == s2_base:
+            return 0.95  # Very high match for version variants
+
         # One contains the other
         if s1 in s2 or s2 in s1:
             return 0.8
+
+        # Handle common skill variations
+        variations = {
+            'js': 'javascript', 'ts': 'typescript', 'py': 'python',
+            'node': 'nodejs', 'react': 'reactjs', 'vue': 'vuejs',
+            'angular': 'angularjs', 'mongo': 'mongodb', 'postgres': 'postgresql',
+            'k8s': 'kubernetes', 'tf': 'terraform', 'aws': 'amazon web services',
+            'gcp': 'google cloud', 'azure': 'microsoft azure'
+        }
+        s1_var = variations.get(s1, s1)
+        s2_var = variations.get(s2, s2)
+        if s1_var == s2 or s2_var == s1 or s1_var == s2_var:
+            return 1.0
 
         # Related skills
         related = [r.lower() for r in self.get_related(s1)]
@@ -339,8 +406,8 @@ class SkillTaxonomy:
             return 0.6
 
         # Word overlap
-        words1 = set(s1.split())
-        words2 = set(s2.split())
+        words1 = set(s1.replace('-', ' ').replace('.', ' ').split())
+        words2 = set(s2.replace('-', ' ').replace('.', ' ').split())
         if words1 & words2:  # Any common words
             overlap = len(words1 & words2) / max(len(words1), len(words2))
             return overlap * 0.5

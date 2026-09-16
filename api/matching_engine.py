@@ -107,6 +107,8 @@ class MatchingEngine:
         - Required skills coverage (0-80 points)
         - Preferred skills bonus (0-15 points)
         - Related skills bonus (0-5 points)
+
+        Enhanced for GPT-4o extracted skills with semantic matching.
         """
         candidate_skills = candidate.skills.all_skills()
         required_skills = jd.required_skills
@@ -131,9 +133,18 @@ class MatchingEngine:
         )
 
         # Calculate required skills score (0-80)
+        # Use weighted scoring based on skill importance
         if required_skills:
-            required_coverage = len(match_result['matched_required']) / len(required_skills)
-            required_score = required_coverage * 80
+            matched_count = len(match_result['matched_required'])
+            total_required = len(required_skills)
+
+            # Direct match bonus - full credit
+            direct_matches = sum(1 for s in match_result['matched_required'] if '(related)' not in s)
+            # Related matches - partial credit (70%)
+            related_matches = sum(1 for s in match_result['matched_required'] if '(related)' in s)
+
+            effective_coverage = (direct_matches + (related_matches * 0.7)) / total_required
+            required_score = min(80, effective_coverage * 80)
         else:
             required_score = 50  # No requirements = partial score
 
@@ -144,11 +155,15 @@ class MatchingEngine:
         else:
             preferred_bonus = 5  # No preferred skills = small bonus
 
-        # Related skills bonus (0-5)
+        # Related skills bonus (0-5) - reward breadth of knowledge
         related_count = sum(1 for s in match_result['matched_required'] if '(related)' in s)
         related_bonus = min(5, related_count * 1.5)
 
-        total_score = min(100, required_score + preferred_bonus + related_bonus)
+        # Bonus skills value (0-5) - extra skills show depth
+        bonus_count = len(match_result.get('bonus_skills', []))
+        bonus_skills_score = min(5, bonus_count * 0.5)
+
+        total_score = min(100, required_score + preferred_bonus + related_bonus + bonus_skills_score)
 
         return total_score, match_result
 

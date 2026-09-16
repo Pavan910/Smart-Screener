@@ -19,22 +19,26 @@ _cache: Dict[str, Dict[str, Any]] = {}
 
 def get_ai_config() -> Optional[Dict[str, str]]:
     """Get AI provider configuration from environment."""
-    groq_key = os.environ.get('GROQ_API_KEY', '')
-    if groq_key:
-        return {
-            'provider': 'groq',
-            'api_key': groq_key,
-            'base_url': 'https://api.groq.com/openai/v1/chat/completions',
-            'model': 'llama-3.3-70b-versatile'
-        }
-
+    # Prioritize OpenAI GPT-4o for best accuracy
     openai_key = os.environ.get('OPENAI_API_KEY', '')
     if openai_key:
         return {
             'provider': 'openai',
             'api_key': openai_key,
             'base_url': 'https://api.openai.com/v1/chat/completions',
-            'model': 'gpt-4o-mini'  # Cost-effective for structured extraction
+            'model': 'gpt-4o',  # Most capable model for accurate extraction
+            'supports_json_mode': True
+        }
+
+    # Fallback to Groq if no OpenAI key
+    groq_key = os.environ.get('GROQ_API_KEY', '')
+    if groq_key:
+        return {
+            'provider': 'groq',
+            'api_key': groq_key,
+            'base_url': 'https://api.groq.com/openai/v1/chat/completions',
+            'model': 'llama-3.3-70b-versatile',
+            'supports_json_mode': False
         }
 
     return None
@@ -43,17 +47,19 @@ def get_ai_config() -> Optional[Dict[str, str]]:
 def call_ai(
     prompt: str,
     system_prompt: str = "You are an expert technical recruiter and resume analyst. Extract information accurately and return valid JSON.",
-    max_tokens: int = 2000,
-    temperature: float = 0.1
+    max_tokens: int = 3000,
+    temperature: float = 0.1,
+    use_json_mode: bool = True
 ) -> Optional[str]:
     """
-    Call AI provider (Groq or OpenAI) with given prompt.
+    Call AI provider (OpenAI GPT-4o or Groq) with given prompt.
 
     Args:
         prompt: User prompt to send
         system_prompt: System instruction
         max_tokens: Maximum response tokens
         temperature: Response temperature (lower = more deterministic)
+        use_json_mode: Whether to use JSON response format (OpenAI only)
 
     Returns:
         AI response text or None on failure
@@ -64,7 +70,7 @@ def call_ai(
         return None
 
     try:
-        data = json.dumps({
+        request_body = {
             "model": config['model'],
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -72,7 +78,13 @@ def call_ai(
             ],
             "temperature": temperature,
             "max_tokens": max_tokens
-        }).encode('utf-8')
+        }
+
+        # Use JSON mode for OpenAI (ensures valid JSON output)
+        if use_json_mode and config.get('supports_json_mode'):
+            request_body["response_format"] = {"type": "json_object"}
+
+        data = json.dumps(request_body).encode('utf-8')
 
         req = urllib.request.Request(
             config['base_url'],
@@ -83,14 +95,20 @@ def call_ai(
             }
         )
 
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        # Increased timeout for complex extractions
+        with urllib.request.urlopen(req, timeout=60) as resp:
             result = json.loads(resp.read().decode('utf-8'))
             content = result['choices'][0]['message']['content'].strip()
-            print(f"[AI] {config['provider']}: {len(content)} chars response")
+            print(f"[AI] {config['provider']} ({config['model']}): {len(content)} chars")
             return content
 
     except urllib.error.HTTPError as e:
-        print(f"[AI] HTTP Error {e.code}: {e.reason}")
+        error_body = ""
+        try:
+            error_body = e.read().decode('utf-8')
+        except:
+            pass
+        print(f"[AI] HTTP Error {e.code}: {e.reason} - {error_body[:200]}")
         return None
     except urllib.error.URLError as e:
         print(f"[AI] URL Error: {e.reason}")

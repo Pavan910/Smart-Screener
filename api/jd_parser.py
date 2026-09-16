@@ -18,59 +18,66 @@ except ImportError:
     from skill_taxonomy import normalize_skills
 
 
-# AI prompt for JD extraction
-JD_EXTRACTION_PROMPT = """You are an expert technical recruiter analyzing a job description. Extract ALL requirements from this job posting.
+# AI prompt for JD extraction - optimized for GPT-4o
+JD_EXTRACTION_PROMPT = """You are a senior technical recruiter with 15+ years of experience analyzing job descriptions. Your task is to extract structured requirements from this job posting with precision.
 
 === JOB DESCRIPTION ===
 {jd_text}
 === END JOB DESCRIPTION ===
 
-Extract the following information in JSON format. Be thorough and extract EVERYTHING mentioned:
+Analyze the job description carefully and extract ALL requirements. Return a JSON object with the following structure:
 
 {{
-  "job_title": "The job title/position name",
+  "job_title": "Exact job title from the posting",
   "required_skills": [
-    "List ALL skills explicitly marked as required, must-have, essential, or mandatory",
-    "Include programming languages, frameworks, tools, platforms mentioned as requirements",
-    "Include any technical competencies explicitly required"
+    "Extract EVERY skill that is marked as required, must-have, essential, mandatory, or necessary",
+    "Include: programming languages, frameworks, libraries, databases, cloud platforms, tools",
+    "Preserve version numbers (React 18, Python 3.11, Node.js 18+)",
+    "Include methodologies (Agile, Scrum, TDD, CI/CD)"
   ],
   "preferred_skills": [
-    "Skills marked as preferred, nice-to-have, bonus, plus, or advantageous",
-    "Skills mentioned with words like 'familiarity with' or 'exposure to'",
-    "Additional skills that would be beneficial but not mandatory"
+    "Skills marked as: preferred, nice-to-have, bonus, plus, advantageous, desirable",
+    "Skills with: 'familiarity with', 'exposure to', 'understanding of', 'knowledge of is a plus'",
+    "Any skill mentioned but not explicitly required"
   ],
-  "min_experience_years": "Minimum years required (number or null if not specified)",
-  "max_experience_years": "Maximum years required (number or null if not specified)",
-  "experience_level": "One of: intern, junior, mid, senior, lead, principal, executive",
-  "education_required": "Degree requirements if any (e.g., Bachelor's in CS, or null)",
-  "certifications_preferred": ["List any certifications mentioned"],
-  "industry_keywords": [
-    "Domain-specific terms like fintech, healthcare, e-commerce, SaaS, B2B, etc.",
-    "Industry or vertical mentions"
-  ],
-  "key_responsibilities": [
-    "Top 5-7 main job duties or responsibilities"
-  ],
-  "location_preference": "Location mentioned (city, remote, hybrid, etc.)",
-  "remote_friendly": true/false
+  "min_experience_years": <number or null>,
+  "max_experience_years": <number or null>,
+  "experience_level": "intern|junior|mid|senior|lead|principal|executive",
+  "education_required": "Exact education requirement or null",
+  "certifications_preferred": ["AWS Certified", "PMP", etc.],
+  "industry_keywords": ["Domain terms: fintech, healthcare, e-commerce, SaaS, B2B, startup, enterprise"],
+  "key_responsibilities": ["Top 5-7 main job duties"],
+  "location_preference": "City/Region or Remote/Hybrid",
+  "remote_friendly": true|false,
+  "team_size_hint": "If mentioned: 'individual contributor', 'small team', 'large team', 'lead X engineers'",
+  "urgency_indicators": ["immediate", "asap", "growing team", etc. if present]
 }}
 
-IMPORTANT RULES:
-1. Extract skills EXACTLY as mentioned - preserve specific versions (React 18, Python 3.x, etc.)
-2. If experience is not explicitly stated, infer from level:
-   - intern: 0-1 years
-   - junior: 0-2 years
-   - mid: 2-5 years
-   - senior: 5-10 years
-   - lead: 7-15 years
-   - principal/executive: 10+ years
-3. Distinguish between REQUIRED (must have) and PREFERRED (nice to have) carefully:
-   - "Must have X" or "X required" → required
-   - "Nice to have X" or "X is a plus" → preferred
-   - If unclear, put technical skills in required, soft skills in preferred
-4. Extract ALL skills mentioned, even if implied (e.g., "full-stack" implies frontend + backend skills)
-5. For remote_friendly: true if "remote", "work from home", "WFH" mentioned; false if "on-site only"
-6. Return ONLY valid JSON, no additional text"""
+EXTRACTION RULES:
+
+1. SKILL CLASSIFICATION:
+   - REQUIRED signals: "must have", "required", "essential", "mandatory", "strong experience in", "proficient in", "expert in"
+   - PREFERRED signals: "nice to have", "bonus", "plus", "preferred", "desirable", "familiarity", "exposure"
+   - When ambiguous: Technical core skills → required, Supplementary skills → preferred
+
+2. EXPERIENCE PARSING:
+   - "5+ years" → min: 5, max: null
+   - "3-5 years" → min: 3, max: 5
+   - "minimum 2 years" → min: 2, max: null
+   - If only level mentioned, infer: junior(0-2), mid(2-5), senior(5-10), lead(7-15)
+
+3. SKILL EXTRACTION DEPTH:
+   - "Full-stack" → Extract implied: frontend frameworks, backend languages, databases
+   - "DevOps" → Extract implied: CI/CD, containers, cloud, IaC
+   - "Machine Learning" → Extract implied: Python, TensorFlow/PyTorch, data processing
+   - Extract SPECIFIC tools mentioned in responsibilities section too
+
+4. BE THOROUGH:
+   - Scan the ENTIRE document including responsibilities section for hidden requirements
+   - Include both hard skills (technical) and measurable soft skills (e.g., "lead standups", "mentor juniors")
+   - Don't miss skills mentioned in "What you'll do" sections
+
+Return ONLY the JSON object, no explanations."""
 
 
 class JDParser:

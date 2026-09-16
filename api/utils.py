@@ -19,18 +19,29 @@ _cache: Dict[str, Dict[str, Any]] = {}
 
 def get_ai_config() -> Optional[Dict[str, str]]:
     """Get AI provider configuration from environment."""
-    # Prioritize OpenAI GPT-4o for best accuracy
+    # Prioritize Google Gemini for best accuracy and cost efficiency
+    gemini_key = os.environ.get('GEMINI_API_KEY', '')
+    if gemini_key:
+        return {
+            'provider': 'gemini',
+            'api_key': gemini_key,
+            'base_url': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent',
+            'model': 'gemini-1.5-flash',
+            'supports_json_mode': True
+        }
+
+    # Fallback to OpenAI GPT-4o
     openai_key = os.environ.get('OPENAI_API_KEY', '')
     if openai_key:
         return {
             'provider': 'openai',
             'api_key': openai_key,
             'base_url': 'https://api.openai.com/v1/chat/completions',
-            'model': 'gpt-4o',  # Most capable model for accurate extraction
+            'model': 'gpt-4o',
             'supports_json_mode': True
         }
 
-    # Fallback to Groq if no OpenAI key
+    # Fallback to Groq if no other keys
     groq_key = os.environ.get('GROQ_API_KEY', '')
     if groq_key:
         return {
@@ -52,14 +63,14 @@ def call_ai(
     use_json_mode: bool = True
 ) -> Optional[str]:
     """
-    Call AI provider (OpenAI GPT-4o or Groq) with given prompt.
+    Call AI provider (Gemini, OpenAI GPT-4o, or Groq) with given prompt.
 
     Args:
         prompt: User prompt to send
         system_prompt: System instruction
         max_tokens: Maximum response tokens
         temperature: Response temperature (lower = more deterministic)
-        use_json_mode: Whether to use JSON response format (OpenAI only)
+        use_json_mode: Whether to use JSON response format
 
     Returns:
         AI response text or None on failure
@@ -70,6 +81,13 @@ def call_ai(
         return None
 
     try:
+        provider = config['provider']
+
+        # Handle Gemini API (different format)
+        if provider == 'gemini':
+            return _call_gemini(config, prompt, system_prompt, max_tokens, temperature, use_json_mode)
+
+        # Handle OpenAI-compatible APIs (OpenAI, Groq)
         request_body = {
             "model": config['model'],
             "messages": [
@@ -81,7 +99,7 @@ def call_ai(
         }
 
         # Use JSON mode for OpenAI (ensures valid JSON output)
-        if use_json_mode and config.get('supports_json_mode'):
+        if use_json_mode and config.get('supports_json_mode') and provider == 'openai':
             request_body["response_format"] = {"type": "json_object"}
 
         data = json.dumps(request_body).encode('utf-8')
@@ -115,6 +133,82 @@ def call_ai(
         return None
     except Exception as e:
         print(f"[AI] Error: {type(e).__name__}: {e}")
+        return None
+
+
+def _call_gemini(
+    config: Dict[str, str],
+    prompt: str,
+    system_prompt: str,
+    max_tokens: int,
+    temperature: float,
+    use_json_mode: bool
+) -> Optional[str]:
+    """
+    Call Google Gemini API.
+
+    Gemini uses a different request format than OpenAI-compatible APIs.
+    """
+    try:
+        # Build Gemini request body
+        request_body = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": f"{system_prompt}\n\n{prompt}"}
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": max_tokens,
+                "topP": 0.95,
+                "topK": 40
+            }
+        }
+
+        # Enable JSON mode for Gemini
+        if use_json_mode:
+            request_body["generationConfig"]["responseMimeType"] = "application/json"
+
+        data = json.dumps(request_body).encode('utf-8')
+
+        # Gemini uses API key as query parameter
+        url = f"{config['base_url']}?key={config['api_key']}"
+
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={
+                'Content-Type': 'application/json'
+            }
+        )
+
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            result = json.loads(resp.read().decode('utf-8'))
+
+            # Extract content from Gemini response format
+            candidates = result.get('candidates', [])
+            if candidates:
+                content_parts = candidates[0].get('content', {}).get('parts', [])
+                if content_parts:
+                    content = content_parts[0].get('text', '').strip()
+                    print(f"[AI] {config['provider']} ({config['model']}): {len(content)} chars")
+                    return content
+
+            print("[AI] Gemini: No content in response")
+            return None
+
+    except urllib.error.HTTPError as e:
+        error_body = ""
+        try:
+            error_body = e.read().decode('utf-8')
+        except:
+            pass
+        print(f"[AI] Gemini HTTP Error {e.code}: {e.reason} - {error_body[:200]}")
+        return None
+    except Exception as e:
+        print(f"[AI] Gemini Error: {type(e).__name__}: {e}")
         return None
 
 

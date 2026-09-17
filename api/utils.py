@@ -33,8 +33,8 @@ def get_ai_config() -> Optional[Dict[str, str]]:
         return {
             'provider': 'gemini',
             'api_key': gemini_key,
-            'base_url': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent',
-            'model': 'gemini-3.6-flash',
+            'base_url': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+            'model': 'gemini-2.0-flash',
             'supports_json_mode': True
         }
 
@@ -116,8 +116,8 @@ def _get_all_configs():
         configs.append({
             'provider': 'gemini',
             'api_key': gemini_key,
-            'base_url': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent',
-            'model': 'gemini-3.6-flash',
+            'base_url': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+            'model': 'gemini-2.0-flash',
             'supports_json_mode': True
         })
 
@@ -291,7 +291,8 @@ def parse_ai_json(response: Optional[str]) -> Optional[Dict[str, Any]]:
         content = re.sub(r'^```(?:json)?\s*', '', response.strip())
         content = re.sub(r'\s*```$', '', content)
         return json.loads(content)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        print(f"[JSON] Direct parse error: {e}")
         pass
 
     # Try to extract JSON object from response
@@ -299,7 +300,8 @@ def parse_ai_json(response: Optional[str]) -> Optional[Dict[str, Any]]:
         match = re.search(r'\{[\s\S]*\}', response)
         if match:
             return json.loads(match.group(0))
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        print(f"[JSON] Regex extract error: {e}")
         pass
 
     # Try to extract JSON array

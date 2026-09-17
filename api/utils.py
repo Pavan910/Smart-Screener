@@ -28,7 +28,7 @@ def get_ai_config() -> Optional[Dict[str, str]]:
     """Get AI provider configuration from environment."""
     # Prioritize Google Gemini for best accuracy and cost efficiency
     gemini_key = os.environ.get('GEMINI_API_KEY', '')
-    print(f"[AI Config] GEMINI_API_KEY present: {bool(gemini_key)}, GROQ_API_KEY present: {bool(os.environ.get('GROQ_API_KEY', ''))}")
+    print(f"[AI Config] GEMINI: {bool(gemini_key)}, OPENAI: {bool(os.environ.get('OPENAI_API_KEY', ''))}, MISTRAL: {bool(os.environ.get('MISTRAL_API_KEY', ''))}, GROQ: {bool(os.environ.get('GROQ_API_KEY', ''))}")
     if gemini_key:
         return {
             'provider': 'gemini',

@@ -13,6 +13,13 @@ from typing import Optional, Dict, Any, Callable
 from datetime import datetime
 from functools import wraps
 
+# Google Gemini SDK
+try:
+    from google import genai
+    GENAI_AVAILABLE = True
+except ImportError:
+    GENAI_AVAILABLE = False
+
 # Simple in-memory cache for serverless (resets on cold start)
 _cache: Dict[str, Dict[str, Any]] = {}
 
@@ -158,70 +165,46 @@ def _call_gemini(
     use_json_mode: bool
 ) -> Optional[str]:
     """
-    Call Google Gemini API.
+    Call Google Gemini API using official SDK.
 
-    Gemini uses a different request format than OpenAI-compatible APIs.
-    Supports both standard API keys (AIza...) and OAuth keys (AQ...).
+    The SDK properly handles both AIza... and AQ... key formats.
     """
-    try:
-        # Build Gemini request body
-        request_body = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": f"{system_prompt}\n\n{prompt}"}
-                    ]
-                }
-            ],
-            "generationConfig": {
-                "temperature": temperature,
-                "maxOutputTokens": max_tokens,
-                "topP": 0.95,
-                "topK": 40
-            }
-        }
-
-        # Enable JSON mode for Gemini
-        if use_json_mode:
-            request_body["generationConfig"]["responseMimeType"] = "application/json"
-
-        data = json.dumps(request_body).encode('utf-8')
-
-        api_key = config['api_key']
-
-        # Use x-goog-api-key header for authentication
-        # Works for both old format (AIza...) and new format (AQ.)
-        url = config['base_url']
-        headers = {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': api_key
-        }
-
-        req = urllib.request.Request(url, data=data, headers=headers)
-
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            result = json.loads(resp.read().decode('utf-8'))
-
-            # Extract content from Gemini response format
-            candidates = result.get('candidates', [])
-            if candidates:
-                content_parts = candidates[0].get('content', {}).get('parts', [])
-                if content_parts:
-                    content = content_parts[0].get('text', '').strip()
-                    print(f"[AI] {config['provider']} ({config['model']}): {len(content)} chars")
-                    return content
-
-            print("[AI] Gemini: No content in response")
-            return None
-
-    except urllib.error.HTTPError as e:
-        error_body = ""
-        try:
-            error_body = e.read().decode('utf-8')
-        except:
-            pass
-        print(f"[AI] Gemini HTTP Error {e.code}: {e.reason} - {error_body[:500]}")
+    if not GENAI_AVAILABLE:
+        print("[AI] Gemini SDK not available, install google-genai")
         return None
+
+    try:
+        # Initialize client with API key
+        client = genai.Client(api_key=config['api_key'])
+
+        # Build generation config
+        gen_config = {
+            "temperature": temperature,
+            "max_output_tokens": max_tokens,
+        }
+
+        # Enable JSON mode
+        if use_json_mode:
+            gen_config["response_mime_type"] = "application/json"
+
+        # Combine system prompt and user prompt
+        full_prompt = f"{system_prompt}\n\n{prompt}"
+
+        # Call the API
+        response = client.models.generate_content(
+            model=config['model'],
+            contents=full_prompt,
+            config=gen_config
+        )
+
+        if response and response.text:
+            content = response.text.strip()
+            print(f"[AI] {config['provider']} ({config['model']}): {len(content)} chars")
+            return content
+
+        print("[AI] Gemini: No content in response")
+        return None
+
     except Exception as e:
         print(f"[AI] Gemini Error: {type(e).__name__}: {e}")
         return None

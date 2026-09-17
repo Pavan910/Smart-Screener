@@ -220,7 +220,7 @@ def _call_gemini(
             error_body = e.read().decode('utf-8')
         except:
             pass
-        print(f"[AI] Gemini HTTP Error {e.code}: {e.reason} - {error_body[:200]}")
+        print(f"[AI] Gemini HTTP Error {e.code}: {e.reason} - {error_body[:500]}")
         return None
     except Exception as e:
         print(f"[AI] Gemini Error: {type(e).__name__}: {e}")

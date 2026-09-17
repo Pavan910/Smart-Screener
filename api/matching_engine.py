@@ -125,12 +125,17 @@ class MatchingEngine:
                           'matched_preferred': [], 'missing_preferred': [],
                           'bonus_skills': candidate_skills[:10]}
 
+        # Debug: log skills being matched
+        print(f"[Matching] Candidate skills: {len(candidate_skills)} - {', '.join(candidate_skills[:5]) if candidate_skills else 'NONE'}")
+        print(f"[Matching] Required skills: {len(required_skills)} - {', '.join(required_skills[:5]) if required_skills else 'NONE'}")
+
         # Use taxonomy for smart matching
         match_result = match_skills(
             candidate_skills,
             required_skills,
             preferred_skills
         )
+        print(f"[Matching] Matched: {len(match_result.get('matched_required', []))}, Missing: {len(match_result.get('missing_required', []))}")
 
         # Calculate required skills score (0-80)
         # Use weighted scoring based on skill importance

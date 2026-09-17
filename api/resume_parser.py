@@ -459,7 +459,10 @@ Experience: {jd_requirements.min_experience_years or 0}-{jd_requirements.max_exp
             if certs:
                 profile.skills.certifications = certs
 
-            print(f"[Resume Parser] AI extracted: {profile.name} | {current_role} | {total_exp}yrs")
+            all_skills = profile.skills.all_skills()
+            print(f"[Resume Parser] AI extracted: {profile.name} | {current_role} | {total_exp}yrs | {len(all_skills)} skills")
+            if all_skills:
+                print(f"[Resume Parser] Skills: {', '.join(all_skills[:10])}")
             return profile
 
         except Exception as e:

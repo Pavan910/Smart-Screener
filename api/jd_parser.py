@@ -174,6 +174,8 @@ class JDParser:
             )
 
             print(f"[JD Parser] AI extracted: {len(required)} required, {len(preferred)} preferred skills")
+            if required:
+                print(f"[JD Parser] Required: {', '.join(required[:10])}")
             return result
 
         except Exception as e:

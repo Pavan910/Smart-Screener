@@ -42,6 +42,17 @@ def get_ai_config() -> Optional[Dict[str, str]]:
             'supports_json_mode': True
         }
 
+    # Fallback to Mistral (free tier, works with serverless)
+    mistral_key = os.environ.get('MISTRAL_API_KEY', '')
+    if mistral_key:
+        return {
+            'provider': 'mistral',
+            'api_key': mistral_key,
+            'base_url': 'https://api.mistral.ai/v1/chat/completions',
+            'model': 'mistral-small-latest',
+            'supports_json_mode': True
+        }
+
     # Fallback to Groq if no other keys
     groq_key = os.environ.get('GROQ_API_KEY', '')
     if groq_key:

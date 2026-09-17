@@ -7,6 +7,10 @@ This is the entry point for the Vercel serverless deployment.
 
 from flask import Flask, request, jsonify, make_response
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 import hashlib
 import base64
 import time

@@ -33,8 +33,8 @@ def get_ai_config() -> Optional[Dict[str, str]]:
         return {
             'provider': 'gemini',
             'api_key': gemini_key,
-            'base_url': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
-            'model': 'gemini-2.0-flash',
+            'base_url': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent',
+            'model': 'gemini-pro',
             'supports_json_mode': True
         }
 
@@ -67,7 +67,7 @@ def get_ai_config() -> Optional[Dict[str, str]]:
             'provider': 'groq',
             'api_key': groq_key,
             'base_url': 'https://api.groq.com/openai/v1/chat/completions',
-            'model': 'llama3-8b-8192',
+            'model': 'mixtral-8x7b-32768',
             'supports_json_mode': True
         }
 
@@ -116,8 +116,8 @@ def _get_all_configs():
         configs.append({
             'provider': 'gemini',
             'api_key': gemini_key,
-            'base_url': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
-            'model': 'gemini-2.0-flash',
+            'base_url': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent',
+            'model': 'gemini-pro',
             'supports_json_mode': True
         })
 
@@ -147,7 +147,7 @@ def _get_all_configs():
             'provider': 'groq',
             'api_key': groq_key,
             'base_url': 'https://api.groq.com/openai/v1/chat/completions',
-            'model': 'llama3-8b-8192',
+            'model': 'mixtral-8x7b-32768',
             'supports_json_mode': True
         })
 

@@ -177,20 +177,23 @@ def _call_gemini(
         # Initialize client with API key
         client = genai.Client(api_key=config['api_key'])
 
-        # Build generation config
-        gen_config = {
-            "temperature": temperature,
-            "max_output_tokens": max_tokens,
-        }
-
-        # Enable JSON mode
-        if use_json_mode:
-            gen_config["response_mime_type"] = "application/json"
-
         # Combine system prompt and user prompt
         full_prompt = f"{system_prompt}\n\n{prompt}"
 
+        # Build generation config using SDK types
+        from google.genai import types
+
+        gen_config = types.GenerateContentConfig(
+            temperature=temperature,
+            max_output_tokens=max_tokens,
+        )
+
+        # Enable JSON mode
+        if use_json_mode:
+            gen_config.response_mime_type = "application/json"
+
         # Call the API
+        print(f"[AI] Calling Gemini {config['model']}...")
         response = client.models.generate_content(
             model=config['model'],
             contents=full_prompt,
@@ -206,7 +209,9 @@ def _call_gemini(
         return None
 
     except Exception as e:
+        import traceback
         print(f"[AI] Gemini Error: {type(e).__name__}: {e}")
+        print(f"[AI] Traceback: {traceback.format_exc()}")
         return None
 
 

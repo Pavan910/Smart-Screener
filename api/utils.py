@@ -176,20 +176,12 @@ def _call_gemini(
 
         api_key = config['api_key']
 
-        # Determine authentication method based on key format
-        if api_key.startswith('AQ.'):
-            # OAuth/Auth key - use Bearer token in header
-            url = config['base_url']
-            headers = {
-                'Content-Type': 'application/json',
-                'Authorization': f'Bearer {api_key}'
-            }
-        else:
-            # Standard API key - use query parameter
-            url = f"{config['base_url']}?key={api_key}"
-            headers = {
-                'Content-Type': 'application/json'
-            }
+        # Use query parameter for API key authentication
+        # Works for both old format (AIza...) and new format (AQ.)
+        url = f"{config['base_url']}?key={api_key}"
+        headers = {
+            'Content-Type': 'application/json'
+        }
 
         req = urllib.request.Request(url, data=data, headers=headers)
 

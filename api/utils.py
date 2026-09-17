@@ -68,7 +68,7 @@ def get_ai_config() -> Optional[Dict[str, str]]:
             'api_key': groq_key,
             'base_url': 'https://api.groq.com/openai/v1/chat/completions',
             'model': 'openai/gpt-oss-120b',
-            'supports_json_mode': False
+            'supports_json_mode': True
         }
 
     return None
@@ -148,7 +148,7 @@ def _get_all_configs():
             'api_key': groq_key,
             'base_url': 'https://api.groq.com/openai/v1/chat/completions',
             'model': 'openai/gpt-oss-120b',
-            'supports_json_mode': False
+            'supports_json_mode': True
         })
 
     return configs
@@ -175,8 +175,8 @@ def _call_single_provider(config, prompt, system_prompt, max_tokens, temperature
             "max_tokens": max_tokens
         }
 
-        # Use JSON mode for OpenAI (ensures valid JSON output)
-        if use_json_mode and config.get('supports_json_mode') and provider == 'openai':
+        # Use JSON mode for OpenAI-compatible APIs (ensures valid JSON output)
+        if use_json_mode and config.get('supports_json_mode'):
             request_body["response_format"] = {"type": "json_object"}
 
         data = json.dumps(request_body).encode('utf-8')

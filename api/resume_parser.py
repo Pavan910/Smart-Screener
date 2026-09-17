@@ -383,8 +383,9 @@ Experience: {jd_requirements.min_experience_years or 0}-{jd_requirements.max_exp
                     ))
 
             # Skills - handle expanded format from GPT-4o
+            print(f"[Resume Parser] Response keys: {list(data.keys())}")
             skills_data = data.get('skills', {})
-            print(f"[Resume Parser] Skills data type: {type(skills_data).__name__}, content: {str(skills_data)[:200]}")
+            print(f"[Resume Parser] Skills data type: {type(skills_data).__name__}, content: {str(skills_data)[:300]}")
             if isinstance(skills_data, list):
                 # Handle flat list
                 skills = Skills(

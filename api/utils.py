@@ -67,7 +67,7 @@ def get_ai_config() -> Optional[Dict[str, str]]:
             'provider': 'groq',
             'api_key': groq_key,
             'base_url': 'https://api.groq.com/openai/v1/chat/completions',
-            'model': 'openai/gpt-oss-120b',
+            'model': 'qwen/qwen3.8-27b',
             'supports_json_mode': True
         }
 
@@ -147,7 +147,7 @@ def _get_all_configs():
             'provider': 'groq',
             'api_key': groq_key,
             'base_url': 'https://api.groq.com/openai/v1/chat/completions',
-            'model': 'openai/gpt-oss-120b',
+            'model': 'qwen/qwen3.8-27b',
             'supports_json_mode': True
         })
 

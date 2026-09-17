@@ -110,7 +110,8 @@ def call_ai(
             data=data,
             headers={
                 'Content-Type': 'application/json',
-                'Authorization': f'Bearer {config["api_key"]}'
+                'Authorization': f'Bearer {config["api_key"]}',
+                'User-Agent': 'SmartScreener/1.0'
             }
         )
 
@@ -177,11 +178,12 @@ def _call_gemini(
 
         api_key = config['api_key']
 
-        # Use query parameter for API key authentication
+        # Use x-goog-api-key header for authentication
         # Works for both old format (AIza...) and new format (AQ.)
-        url = f"{config['base_url']}?key={api_key}"
+        url = config['base_url']
         headers = {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'x-goog-api-key': api_key
         }
 
         req = urllib.request.Request(url, data=data, headers=headers)

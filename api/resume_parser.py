@@ -548,20 +548,30 @@ Experience: {jd_requirements.min_experience_years or 0}-{jd_requirements.max_exp
 
     def _extract_location_regex(self, text: str, lines: List[str]) -> str:
         """Extract location from contact section only."""
-        # Look in first 10 lines for location patterns
-        header_text = '\n'.join(lines[:10])
+        # Only look at lines near contact info (within 2 lines of email/phone)
+        contact_line_idx = -1
+        for i, line in enumerate(lines[:15]):
+            if '@' in line or re.search(r'\d{10}|\+\d{2}', line):
+                contact_line_idx = i
+                break
 
-        # City, State/Country patterns
-        patterns = [
-            r'([A-Z][a-zA-Z\s]+),\s*([A-Z]{2,})\b',  # City, STATE
-            r'([A-Z][a-zA-Z\s]+),\s*([A-Z][a-zA-Z]+)(?:\s|$)',  # City, Country
-            r'Location[:\s]+([A-Z][a-zA-Z\s,]+)',  # Location: City
-        ]
+        if contact_line_idx == -1:
+            return ""
 
-        for pattern in patterns:
-            match = re.search(pattern, header_text)
-            if match:
-                return match.group(0).replace('Location:', '').strip()
+        # Check lines around contact info
+        start = max(0, contact_line_idx - 2)
+        end = min(len(lines), contact_line_idx + 3)
+        header_text = '\n'.join(lines[start:end])
+
+        # Look for explicit location label first
+        loc_match = re.search(r'Location[:\s]+([A-Za-z\s,]+?)(?:\n|$)', header_text, re.I)
+        if loc_match:
+            return loc_match.group(1).strip()
+
+        # City, 2-letter state code (US format)
+        state_match = re.search(r'([A-Z][a-z]+(?:\s[A-Z][a-z]+)?),\s*([A-Z]{2})(?:\s|,|$)', header_text)
+        if state_match:
+            return f"{state_match.group(1)}, {state_match.group(2)}"
 
         return ""
 

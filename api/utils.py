@@ -82,7 +82,7 @@ def call_ai(
     use_json_mode: bool = True
 ) -> Optional[str]:
     """
-    Call AI provider (Gemini, OpenAI GPT-4o, or Groq) with given prompt.
+    Call AI provider with automatic fallback on failure.
 
     Args:
         prompt: User prompt to send
@@ -94,19 +94,77 @@ def call_ai(
     Returns:
         AI response text or None on failure
     """
-    config = get_ai_config()
-    if not config:
-        print("No AI config available")
-        return None
+    # Try providers in order until one works
+    providers_to_try = _get_all_configs()
 
+    for config in providers_to_try:
+        result = _call_single_provider(config, prompt, system_prompt, max_tokens, temperature, use_json_mode)
+        if result:
+            return result
+        print(f"[AI] {config['provider']} failed, trying next provider...")
+
+    print("[AI] All providers failed")
+    return None
+
+
+def _get_all_configs():
+    """Get all available AI provider configs in priority order."""
+    configs = []
+
+    gemini_key = os.environ.get('GEMINI_API_KEY', '')
+    if gemini_key:
+        configs.append({
+            'provider': 'gemini',
+            'api_key': gemini_key,
+            'base_url': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent',
+            'model': 'gemini-3.6-flash',
+            'supports_json_mode': True
+        })
+
+    openai_key = os.environ.get('OPENAI_API_KEY', '')
+    if openai_key:
+        configs.append({
+            'provider': 'openai',
+            'api_key': openai_key,
+            'base_url': 'https://api.openai.com/v1/chat/completions',
+            'model': 'gpt-4o',
+            'supports_json_mode': True
+        })
+
+    mistral_key = os.environ.get('MISTRAL_API_KEY', '')
+    if mistral_key:
+        configs.append({
+            'provider': 'mistral',
+            'api_key': mistral_key,
+            'base_url': 'https://api.mistral.ai/v1/chat/completions',
+            'model': 'mistral-small-latest',
+            'supports_json_mode': True
+        })
+
+    groq_key = os.environ.get('GROQ_API_KEY', '')
+    if groq_key:
+        configs.append({
+            'provider': 'groq',
+            'api_key': groq_key,
+            'base_url': 'https://api.groq.com/openai/v1/chat/completions',
+            'model': 'llama-3.3-70b-versatile',
+            'supports_json_mode': False
+        })
+
+    return configs
+
+
+def _call_single_provider(config, prompt, system_prompt, max_tokens, temperature, use_json_mode):
+    """Call a single AI provider and return result or None on failure."""
     try:
         provider = config['provider']
+        print(f"[AI] Trying {provider}...")
 
         # Handle Gemini API (different format)
         if provider == 'gemini':
             return _call_gemini(config, prompt, system_prompt, max_tokens, temperature, use_json_mode)
 
-        # Handle OpenAI-compatible APIs (OpenAI, Groq)
+        # Handle OpenAI-compatible APIs (OpenAI, Mistral, Groq)
         request_body = {
             "model": config['model'],
             "messages": [
@@ -146,13 +204,13 @@ def call_ai(
             error_body = e.read().decode('utf-8')
         except:
             pass
-        print(f"[AI] HTTP Error {e.code}: {e.reason} - {error_body[:200]}")
+        print(f"[AI] {config['provider']} HTTP Error {e.code}: {e.reason} - {error_body[:200]}")
         return None
     except urllib.error.URLError as e:
-        print(f"[AI] URL Error: {e.reason}")
+        print(f"[AI] {config['provider']} URL Error: {e.reason}")
         return None
     except Exception as e:
-        print(f"[AI] Error: {type(e).__name__}: {e}")
+        print(f"[AI] {config['provider']} Error: {type(e).__name__}: {e}")
         return None
 
 

@@ -33,8 +33,8 @@ def get_ai_config() -> Optional[Dict[str, str]]:
         return {
             'provider': 'gemini',
             'api_key': gemini_key,
-            'base_url': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
-            'model': 'gemini-2.0-flash',
+            'base_url': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent',
+            'model': 'gemini-3.7-flash',
             'supports_json_mode': True
         }
 
@@ -116,8 +116,8 @@ def _get_all_configs():
         configs.append({
             'provider': 'gemini',
             'api_key': gemini_key,
-            'base_url': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
-            'model': 'gemini-2.0-flash',
+            'base_url': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent',
+            'model': 'gemini-3.7-flash',
             'supports_json_mode': True
         })
 

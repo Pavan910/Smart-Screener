@@ -342,7 +342,7 @@ Experience: {jd_requirements.min_experience_years or 0}-{jd_requirements.max_exp
         response = call_ai(
             prompt=prompt,
             system_prompt="You are an expert resume analyst. Extract information accurately and return valid JSON only.",
-            max_tokens=2500,
+            max_tokens=4000,
             temperature=0.1
         )
 

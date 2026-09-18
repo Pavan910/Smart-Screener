@@ -563,15 +563,32 @@ Experience: {jd_requirements.min_experience_years or 0}-{jd_requirements.max_exp
         end = min(len(lines), contact_line_idx + 3)
         header_text = '\n'.join(lines[start:end])
 
-        # Look for explicit location label first
-        loc_match = re.search(r'Location[:\s]+([A-Za-z\s,]+?)(?:\n|$)', header_text, re.I)
+        # Look for explicit location/address label first
+        loc_match = re.search(r'(?:Location|Address|City)[:\s]+([A-Za-z\s,.-]+?)(?:\n|$|\|)', header_text, re.I)
         if loc_match:
-            return loc_match.group(1).strip()
+            return loc_match.group(1).strip().rstrip(',.')
 
-        # City, 2-letter state code (US format)
+        # City, 2-letter state code (US format: "New York, NY")
         state_match = re.search(r'([A-Z][a-z]+(?:\s[A-Z][a-z]+)?),\s*([A-Z]{2})(?:\s|,|$)', header_text)
         if state_match:
             return f"{state_match.group(1)}, {state_match.group(2)}"
+
+        # City, Region/Country format (e.g., "Mumbai, India", "London, UK", "Toronto, Ontario")
+        region_match = re.search(r'([A-Z][a-z]+(?:\s[A-Z][a-z]+)?),\s*([A-Z][a-z]+(?:\s?[A-Za-z]*)?)(?:\s|,|$|\n|\|)', header_text)
+        if region_match:
+            city = region_match.group(1).strip()
+            region = region_match.group(2).strip()
+            # Filter out non-location words that might match
+            if region.lower() not in ['email', 'phone', 'mobile', 'tel', 'linkedin', 'github', 'resume', 'cv']:
+                return f"{city}, {region}"
+
+        # Standalone capitalized word on its own line (likely a city)
+        for line in header_text.split('\n'):
+            line = line.strip()
+            # Single word or two words, capitalized, not email/phone/link
+            if re.match(r'^[A-Z][a-z]+(?:\s[A-Z][a-z]+)?$', line) and '@' not in line and 'http' not in line.lower():
+                if line.lower() not in ['resume', 'cv', 'phone', 'email', 'mobile', 'linkedin', 'github', 'address', 'contact']:
+                    return line
 
         return ""
 

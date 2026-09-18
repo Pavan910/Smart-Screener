@@ -360,12 +360,17 @@ Experience: {jd_requirements.min_experience_years or 0}-{jd_requirements.max_exp
             if isinstance(contact_data, str):
                 contact_data = {}
 
+            # Debug logging for contact data
+            location_val = contact_data.get('location', '') or data.get('location', '')
+            print(f"[Resume Parser] Contact data: {contact_data}")
+            print(f"[Resume Parser] Location extracted: '{location_val}'")
+
             contact = ContactInfo(
                 email=contact_data.get('email', '') or data.get('email', ''),
                 phone=contact_data.get('phone', '') or data.get('phone', ''),
                 linkedin=contact_data.get('linkedin', '') or data.get('linkedin', ''),
                 github=contact_data.get('github', ''),
-                location=contact_data.get('location', '') or data.get('location', '')
+                location=location_val
             )
 
             # Work history
